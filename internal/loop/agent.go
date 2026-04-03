@@ -55,6 +55,11 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 		var err error
 
 		a.logger.Info("User query: %s", messages[len(messages)-1])
+		println()
+		for _, m := range messages {
+			fmt.Printf("%+v\n", m)
+		}
+		fmt.Println()
 		choice, err = a.callLLMStream(ctx, messages, systemPrompt)
 		if err != nil {
 			return fmt.Errorf("LLM call failed: %w", err)
