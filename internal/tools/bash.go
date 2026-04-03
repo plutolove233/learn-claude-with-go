@@ -42,7 +42,7 @@ func (b *BashTool) Parameters() map[string]any {
 	}
 }
 
-func (b *BashTool) Execute(input map[string]interface{}) (string, error) {
+func (b *BashTool) Execute(input map[string]any) (string, error) {
 	raw, ok := input["command"]
 	if !ok {
 		return "", errors.New("command field required")

@@ -90,9 +90,9 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 			var feedback strings.Builder
 			for _, r := range results {
 				if r.Content == "" {
-					feedback.WriteString(fmt.Sprintf("Tool %s executed successfully with no output.\n", r.Name))
+					fmt.Fprintf(&feedback, "Tool %s executed successfully with no output.\n", r.Name)
 				} else {
-					feedback.WriteString(fmt.Sprintf("Tool %s executed, output: %s\n", r.Name, r.Content))
+					fmt.Fprintf(&feedback, "Tool %s executed, output: %s\n", r.Name, r.Content)
 				}
 			}
 			messages = append(messages, Message{Role: "user", Content: feedback.String()})
@@ -234,6 +234,7 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 		var output string
 		var execErr error
 		for _, t := range a.tools {
+			// Match tool by name and execute
 			if t.Name() == fn.Name {
 				a.logger.Info("Execute tool: %s with args: %+v", t.Name(), input)
 				output, execErr = t.Execute(input)
@@ -251,19 +252,12 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 			Content:    output,
 		})
 
-		// Provide clear feedback to LLM
-		if output == "" && execErr == nil {
-			a.logger.Info("Tool %s executed successfully with no output", fn.Name)
-		}
-
 		// Print the command being executed
-		if cmd, ok := input["command"].(string); ok {
-			fmt.Printf("\033[33m$ %s\033[0m\n", cmd)
-			if len(output) > 200 {
-				fmt.Println(output[:200] + "...")
-			} else if output != "" {
-				fmt.Println(output)
-			}
+		fmt.Printf("\033[33m$ Execute %s(%s)\033[0m\n\n", fn.Name, fn.Arguments)
+		if len(output) > 200 {
+			fmt.Println(output[:200] + "...")
+		} else if output != "" {
+			fmt.Println(output)
 		}
 	}
 	return results, nil
