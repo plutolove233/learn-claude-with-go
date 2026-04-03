@@ -24,11 +24,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	log, err := logger.New()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create logger: %v\n", err)
-		os.Exit(1)
-	}
+	log := logger.GetLogger()
 	defer log.Close()
 
 	bashTool := tools.NewBashTool()
@@ -72,6 +68,7 @@ func main() {
 		}
 
 		if err := agent.Run(ctx, messages); err != nil {
+			log.Logf("Agent run failed: %v", err)
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
 		fmt.Println()
