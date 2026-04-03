@@ -36,8 +36,14 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-sigCh
-		cancel()
+		for {
+			select {
+			case <-sigCh:
+				cancel()
+			case <-ctx.Done():
+				return
+			}
+		}
 	}()
 
 	fmt.Println("ClaudeGo Agent (type 'q' to quit)")
@@ -68,7 +74,7 @@ func main() {
 		}
 
 		if err := agent.Run(ctx, messages); err != nil {
-			log.Logf("Agent run failed: %v", err)
+			log.Warning("Agent run failed: %v", err)
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		}
 		fmt.Println()

@@ -29,6 +29,19 @@ func (b *BashTool) Description() string {
 	return "Run a shell command in the terminal"
 }
 
+func (b *BashTool) Parameters() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"command": map[string]any{
+				"type":        "string",
+				"description": "The shell command to execute",
+			},
+		},
+		"required": []string{"command"},
+	}
+}
+
 func (b *BashTool) Execute(input map[string]interface{}) (string, error) {
 	raw, ok := input["command"]
 	if !ok {

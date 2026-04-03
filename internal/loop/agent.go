@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -23,6 +24,7 @@ type Message struct {
 type ToolCallResult struct {
 	Role       string `json:"role"`
 	ToolCallID string `json:"tool_call_id"`
+	Name       string `json:"name"`
 	Content    string `json:"content"`
 }
 
@@ -42,32 +44,33 @@ func New(cfg *config.Config, l *logger.Logger, toolList []tools.Tool) *Agent {
 }
 
 func (a *Agent) Run(ctx context.Context, messages []Message) error {
-	systemPrompt := "You are a coding agent. Use bash to solve tasks. Act, don't explain."
+	pwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Use bash to solve tasks.", pwd)
 
 	for {
 		var choice openai.ChatCompletionChoice
 		var err error
 
-		if a.cfg.Stream {
-			choice, err = a.callLLMStream(ctx, messages, systemPrompt)
-		} else {
-			var resp *openai.ChatCompletion
-			resp, err = a.callLLM(ctx, messages, systemPrompt)
-			if err != nil {
-				return fmt.Errorf("LLM call failed: %w", err)
-			}
-			if len(resp.Choices) == 0 {
-				return fmt.Errorf("no choices returned")
-			}
-			choice = resp.Choices[0]
-		}
-
+		a.logger.Info("User query: %s", messages[len(messages)-1])
+		choice, err = a.callLLMStream(ctx, messages, systemPrompt)
 		if err != nil {
 			return fmt.Errorf("LLM call failed: %w", err)
 		}
 
+		a.logger.Info("LLM response: %s", choice.Message.Content)
+		a.logger.Info("Stop reason: %s", choice.FinishReason)
+		a.logger.Info("LLM tool calls: %+v", choice.Message.ToolCalls)
 		// Append assistant message
 		messages = append(messages, Message{Role: "assistant", Content: choice.Message.Content})
+
+		// No tool calls - output final response
+		if choice.Message.Content != "" {
+			fmt.Println(choice.Message.Content)
+			return nil
+		}
 
 		// Check if model called tools
 		if len(choice.Message.ToolCalls) > 0 {
@@ -78,13 +81,17 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 			}
 
 			// Append tool results
-			messages = append(messages, Message{Role: "user", Content: results})
+			a.logger.Info("Tool execution results: %+v", results)
+			var feedback strings.Builder
+			for _, r := range results {
+				if r.Content == "" {
+					feedback.WriteString(fmt.Sprintf("Tool %s executed successfully with no output.\n", r.Name))
+				} else {
+					feedback.WriteString(fmt.Sprintf("Tool %s executed, output: %s\n", r.Name, r.Content))
+				}
+			}
+			messages = append(messages, Message{Role: "user", Content: feedback.String()})
 			continue
-		}
-
-		// No tool calls - output final response
-		if choice.Message.Content != "" {
-			fmt.Println(choice.Message.Content)
 		}
 		return nil
 	}
@@ -116,9 +123,6 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 		Messages: openaiMsgs,
 		Model:    shared.ChatModel(a.cfg.Model),
 		Tools:    toolDefs,
-		StreamOptions: openai.ChatCompletionStreamOptionsParam{
-			IncludeUsage: openai.Bool(true),
-		},
 	})
 	defer stream.Close()
 
@@ -163,7 +167,7 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 
 	return openai.ChatCompletionChoice{
 		Message: openai.ChatCompletionMessage{
-			Content:    fullContent.String(),
+			Content:   fullContent.String(),
 			ToolCalls: toolCalls,
 		},
 		FinishReason: finishReason,
@@ -203,15 +207,7 @@ func (a *Agent) buildToolDefs() []openai.ChatCompletionToolUnionParam {
 		toolDefs[i] = openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
 			Name:        t.Name(),
 			Description: openai.String(t.Description()),
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"command": map[string]any{
-						"type": "string",
-					},
-				},
-				"required": []string{"command"},
-			},
+			Parameters:  t.Parameters(),
 		})
 	}
 	return toolDefs
@@ -231,12 +227,13 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 		}
 
 		var output string
+		var execErr error
 		for _, t := range a.tools {
 			if t.Name() == fn.Name {
-				var err error
-				output, err = t.Execute(input)
-				if err != nil {
-					output = "Error: " + err.Error()
+				a.logger.Info("Execute tool: %s with args: %+v", t.Name(), input)
+				output, execErr = t.Execute(input)
+				if execErr != nil {
+					output = "Error: " + execErr.Error()
 				}
 				break
 			}
@@ -244,9 +241,15 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 
 		results = append(results, ToolCallResult{
 			Role:       "tool",
+			Name:       fn.Name,
 			ToolCallID: tc.ID,
 			Content:    output,
 		})
+
+		// Provide clear feedback to LLM
+		if output == "" && execErr == nil {
+			a.logger.Info("Tool %s executed successfully with no output", fn.Name)
+		}
 
 		// Print the command being executed
 		if cmd, ok := input["command"].(string); ok {

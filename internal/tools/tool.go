@@ -4,4 +4,5 @@ type Tool interface {
 	Name() string
 	Description() string
 	Execute(input map[string]interface{}) (string, error)
+	Parameters() map[string]any
 }

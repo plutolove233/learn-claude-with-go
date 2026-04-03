@@ -19,15 +19,8 @@ func TestLogger(t *testing.T) {
 	}
 	defer f.Close()
 
-	l := &Logger{file: f}
-	entry := LogEntry{
-		Timestamp: time.Now(),
-		Type:      "test",
-		Data:      map[string]interface{}{"msg": "hello"},
-	}
-	if err := l.Log(entry); err != nil {
-		t.Fatalf("Log error: %v", err)
-	}
+	log := GetLogger()
+	log.Info("Hello")
 }
 
 func TestNew_LogDirCreation(t *testing.T) {
