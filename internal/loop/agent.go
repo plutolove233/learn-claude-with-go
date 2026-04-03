@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"time"
+	"strings"
 
-	"github.com/sashabaranov/go-openai"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/shared"
 
 	"claudego/internal/config"
 	"claudego/internal/tools"
@@ -29,15 +30,14 @@ type Agent struct {
 	cfg    *config.Config
 	logger *logger.Logger
 	tools  []tools.Tool
-	client *openai.Client
+	client openai.Client
 }
 
 func New(cfg *config.Config, l *logger.Logger, toolList []tools.Tool) *Agent {
-	clientCfg := openai.DefaultConfig(cfg.APIKey)
-	clientCfg.BaseURL = cfg.BaseURL + "/chat/completions"
-	clientCfg.HTTPClient = &http.Client{Timeout: 120 * time.Second}
-
-	client := openai.NewClientWithConfig(clientCfg)
+	client := openai.NewClient(
+		option.WithAPIKey(cfg.APIKey),
+		option.WithBaseURL(cfg.BaseURL),
+	)
 	return &Agent{cfg: cfg, logger: l, tools: toolList, client: client}
 }
 
@@ -45,115 +45,194 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 	systemPrompt := "You are a coding agent. Use bash to solve tasks. Act, don't explain."
 
 	for {
-		resp, err := a.callLLM(ctx, messages, systemPrompt)
+		var choice openai.ChatCompletionChoice
+		var err error
+
+		if a.cfg.Stream {
+			choice, err = a.callLLMStream(ctx, messages, systemPrompt)
+		} else {
+			var resp *openai.ChatCompletion
+			resp, err = a.callLLM(ctx, messages, systemPrompt)
+			if err != nil {
+				return fmt.Errorf("LLM call failed: %w", err)
+			}
+			if len(resp.Choices) == 0 {
+				return fmt.Errorf("no choices returned")
+			}
+			choice = resp.Choices[0]
+		}
+
 		if err != nil {
 			return fmt.Errorf("LLM call failed: %w", err)
 		}
 
-		if len(resp.Choices) == 0 {
-			return fmt.Errorf("no choices returned")
-		}
-
-		choice := resp.Choices[0]
-
 		// Append assistant message
 		messages = append(messages, Message{Role: "assistant", Content: choice.Message.Content})
 
-		if choice.FinishReason != openai.FinishReasonToolCalls {
-			// Output final response
-			if choice.Message.Content != "" {
-				fmt.Println(choice.Message.Content)
+		// Check if model called tools
+		if len(choice.Message.ToolCalls) > 0 {
+			// Execute tools
+			results, err := a.executeTools(choice.Message.ToolCalls)
+			if err != nil {
+				return fmt.Errorf("tool execution failed: %w", err)
 			}
-			return nil
+
+			// Append tool results
+			messages = append(messages, Message{Role: "user", Content: results})
+			continue
 		}
 
-		// Execute tools
-		results, err := a.executeTools(choice.Message.ToolCalls)
-		if err != nil {
-			return fmt.Errorf("tool execution failed: %w", err)
+		// No tool calls - output final response
+		if choice.Message.Content != "" {
+			fmt.Println(choice.Message.Content)
 		}
-
-		// Append tool results
-		messages = append(messages, Message{Role: "user", Content: results})
+		return nil
 	}
 }
 
-func (a *Agent) callLLM(ctx context.Context, messages []Message, system string) (*openai.ChatCompletionResponse, error) {
-	// Convert messages to OpenAI format
-	openaiMsgs := make([]openai.ChatCompletionMessage, 0, len(messages)+1)
-	openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleSystem,
-		Content: system,
+// callLLM non-streaming
+func (a *Agent) callLLM(ctx context.Context, messages []Message, system string) (*openai.ChatCompletion, error) {
+	openaiMsgs := a.buildMessages(messages, system)
+	toolDefs := a.buildToolDefs()
+
+	resp, err := a.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Messages: openaiMsgs,
+		Model:    shared.ChatModel(a.cfg.Model),
+		Tools:    toolDefs,
 	})
-	for _, m := range messages {
-		if m.Role == "user" {
-			if content, ok := m.Content.(string); ok {
-				openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessage{
-					Role:    openai.ChatMessageRoleUser,
-					Content: content,
-				})
-			} else if results, ok := m.Content.([]ToolCallResult); ok {
-				for _, r := range results {
-					openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessage{
-						Role:       openai.ChatMessageRoleTool,
-						Content:    r.Content,
-						ToolCallID: r.ToolCallID,
-					})
-				}
-			}
-		} else if m.Role == "assistant" {
-			if content, ok := m.Content.(string); ok {
-				openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessage{
-					Role:    openai.ChatMessageRoleAssistant,
-					Content: content,
-				})
-			}
-		}
-	}
-
-	// Build tool definitions
-	toolDefs := make([]openai.Tool, 0, len(a.tools))
-	for _, t := range a.tools {
-		toolDefs = append(toolDefs, openai.Tool{
-			Type: openai.ToolTypeFunction,
-			Function: &openai.FunctionDefinition{
-				Name:        t.Name(),
-				Description: t.Description(),
-				Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{"command": map[string]interface{}{"type": "string"}}},
-			},
-		})
-	}
-
-	resp, err := a.client.CreateChatCompletion(
-		ctx,
-		openai.ChatCompletionRequest{
-			Model:    a.cfg.Model,
-			Messages: openaiMsgs,
-			Tools:    toolDefs,
-		},
-	)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(resp.Choices) == 0 {
-		return nil, fmt.Errorf("no choices returned")
-	}
-
-	return &resp, nil
+	return resp, nil
 }
 
-func (a *Agent) executeTools(toolCalls []openai.ToolCall) ([]ToolCallResult, error) {
+// callLLMStream streaming版本
+func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system string) (openai.ChatCompletionChoice, error) {
+	openaiMsgs := a.buildMessages(messages, system)
+	toolDefs := a.buildToolDefs()
+
+	stream := a.client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
+		Messages: openaiMsgs,
+		Model:    shared.ChatModel(a.cfg.Model),
+		Tools:    toolDefs,
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: openai.Bool(true),
+		},
+	})
+	defer stream.Close()
+
+	var fullContent strings.Builder
+	var toolCalls []openai.ChatCompletionMessageToolCallUnion
+	var finishReason string
+
+	for stream.Next() {
+		event := stream.Current()
+		if len(event.Choices) == 0 {
+			continue
+		}
+
+		delta := event.Choices[0].Delta
+		finishReason = event.Choices[0].FinishReason
+
+		// Accumulate content
+		if delta.Content != "" {
+			fmt.Print(delta.Content)
+			fullContent.WriteString(delta.Content)
+		}
+
+		// Accumulate tool calls from streaming delta
+		for _, tc := range delta.ToolCalls {
+			// Convert ChatCompletionChunkChoiceDeltaToolCall to ChatCompletionMessageToolCallUnion
+			toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnion{
+				ID:   tc.ID,
+				Type: tc.Type,
+				Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+			})
+		}
+	}
+
+	if stream.Err() != nil {
+		return openai.ChatCompletionChoice{}, stream.Err()
+	}
+
+	fmt.Println() // newline after streaming output
+
+	return openai.ChatCompletionChoice{
+		Message: openai.ChatCompletionMessage{
+			Content:    fullContent.String(),
+			ToolCalls: toolCalls,
+		},
+		FinishReason: finishReason,
+	}, nil
+}
+
+func (a *Agent) buildMessages(messages []Message, system string) []openai.ChatCompletionMessageParamUnion {
+	openaiMsgs := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
+	openaiMsgs = append(openaiMsgs, openai.SystemMessage(system))
+
+	for _, m := range messages {
+		switch m.Role {
+		case "user":
+			if content, ok := m.Content.(string); ok {
+				openaiMsgs = append(openaiMsgs, openai.UserMessage(content))
+			} else if results, ok := m.Content.([]ToolCallResult); ok {
+				for _, r := range results {
+					openaiMsgs = append(openaiMsgs, openai.ToolMessage(r.Content, r.ToolCallID))
+				}
+			}
+		case "assistant":
+			if content, ok := m.Content.(string); ok {
+				openaiMsgs = append(openaiMsgs, openai.AssistantMessage(content))
+			}
+		}
+	}
+	return openaiMsgs
+}
+
+func (a *Agent) buildToolDefs() []openai.ChatCompletionToolUnionParam {
+	if len(a.tools) == 0 {
+		return nil
+	}
+
+	toolDefs := make([]openai.ChatCompletionToolUnionParam, len(a.tools))
+	for i, t := range a.tools {
+		toolDefs[i] = openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
+			Name:        t.Name(),
+			Description: openai.String(t.Description()),
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"command": map[string]any{
+						"type": "string",
+					},
+				},
+				"required": []string{"command"},
+			},
+		})
+	}
+	return toolDefs
+}
+
+func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUnion) ([]ToolCallResult, error) {
 	var results []ToolCallResult
 	for _, tc := range toolCalls {
-		var input map[string]interface{}
-		if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
-			input = map[string]interface{}{}
+		fn := tc.Function
+		if fn.Name == "" {
+			continue
+		}
+
+		var input map[string]any
+		if err := json.Unmarshal([]byte(fn.Arguments), &input); err != nil {
+			input = map[string]any{}
 		}
 
 		var output string
 		for _, t := range a.tools {
-			if t.Name() == tc.Function.Name {
+			if t.Name() == fn.Name {
 				var err error
 				output, err = t.Execute(input)
 				if err != nil {
