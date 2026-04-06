@@ -2,7 +2,6 @@ package loop
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -19,7 +18,7 @@ import (
 
 type Message struct {
 	Role      string
-	Content   any                                 // string or []ToolCallResult
+	Content   any                                         // string or []ToolCallResult
 	ToolCalls []openai.ChatCompletionMessageToolCallUnion // populated for assistant messages
 }
 
@@ -258,10 +257,7 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 		// output reflects what is about to happen, not what already happened.
 		fmt.Printf("\033[33m$ Execute %s(%s)\033[0m\n\n", fn.Name, fn.Arguments)
 
-		var input map[string]any
-		if err := json.Unmarshal([]byte(fn.Arguments), &input); err != nil {
-			input = map[string]any{}
-		}
+		input := []byte(fn.Arguments)
 
 		var output string
 		var toolFound bool
