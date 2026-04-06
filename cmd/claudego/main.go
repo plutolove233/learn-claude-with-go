@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/peterh/liner"
@@ -27,8 +28,14 @@ func main() {
 	log := logger.GetLogger()
 	defer log.Close()
 
-	bashTool := tools.NewBashTool()
-	agent := loop.New(cfg, log, []tools.Tool{bashTool})
+	// Register default tools and get the registry
+	tools.RegisterDefaults()
+	registry := tools.GetRegistry()
+
+	// Optionally enable/disable tools by category
+	// registry.DisableByCategory(tools.CategoryNetwork)
+
+	agent := loop.New(cfg, log, registry)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -62,7 +69,7 @@ func main() {
 			break
 		}
 
-		query = trimSpace(query)
+		query = strings.TrimSpace(query)
 		if query == "" || query == "q" || query == "exit" {
 			break
 		}
@@ -79,15 +86,4 @@ func main() {
 		}
 		fmt.Println()
 	}
-}
-
-func trimSpace(s string) string {
-	// Simple trim - remove leading/trailing whitespace
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t' || s[0] == '\n' || s[0] == '\r') {
-		s = s[1:]
-	}
-	for len(s) > 0 && (s[len(s)-1] == ' ' || s[len(s)-1] == '\t' || s[len(s)-1] == '\n' || s[len(s)-1] == '\r') {
-		s = s[:len(s)-1]
-	}
-	return s
 }
