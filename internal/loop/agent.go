@@ -10,6 +10,7 @@ import (
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/shared"
+	"github.com/openai/openai-go/v3/shared/constant"
 
 	"claudego/internal/config"
 	"claudego/internal/tools"
@@ -17,8 +18,9 @@ import (
 )
 
 type Message struct {
-	Role    string
-	Content interface{} // string or []ToolCallResult
+	Role      string
+	Content   any                                 // string or []ToolCallResult
+	ToolCalls []openai.ChatCompletionMessageToolCallUnion // populated for assistant messages
 }
 
 type ToolCallResult struct {
@@ -50,71 +52,50 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Use bash to solve tasks.", pwd)
 
 	for {
-		var choice openai.ChatCompletionChoice
-		var err error
 
-		a.logger.Info("User query: %s", messages[len(messages)-1])
-		choice, err = a.callLLMStream(ctx, messages, systemPrompt)
+		choice, err := a.callLLMStream(ctx, messages, systemPrompt)
 		if err != nil {
 			return fmt.Errorf("LLM call failed: %w", err)
 		}
 
 		a.logger.Info("LLM response: %s", choice.Message.Content)
 		a.logger.Info("Stop reason: %s", choice.FinishReason)
-		a.logger.Info("LLM tool calls: %+v", choice.Message.ToolCalls)
-		// Append assistant message
-		messages = append(messages, Message{Role: "assistant", Content: choice.Message.Content})
+		for _, tc := range choice.Message.ToolCalls {
+			a.logger.Info("Tool call - ID: %s, Name: %s, Arguments: %s", tc.ID, tc.Function.Name, tc.Function.Arguments)
+		}
 
-		// when output final response
+		// Fix 1: Persist ToolCalls in the assistant message so buildMessages can
+		// reconstruct a well-formed history (API requires tool_calls before tool results).
+		messages = append(messages, Message{
+			Role:      "assistant",
+			Content:   choice.Message.Content,
+			ToolCalls: choice.Message.ToolCalls,
+		})
+
 		if choice.FinishReason == "stop" {
 			println("\n\nFinal response:")
 			fmt.Println(choice.Message.Content)
 			return nil
 		}
 
-		// Check if model called tools
 		if len(choice.Message.ToolCalls) > 0 {
-			// Execute tools
 			results, err := a.executeTools(choice.Message.ToolCalls)
 			if err != nil {
 				return fmt.Errorf("tool execution failed: %w", err)
 			}
 
-			// Append tool results
 			a.logger.Info("Tool execution results: %+v", results)
-			var feedback strings.Builder
-			for _, r := range results {
-				if r.Content == "" {
-					fmt.Fprintf(&feedback, "Tool %s executed successfully with no output.\n", r.Name)
-				} else {
-					fmt.Fprintf(&feedback, "Tool %s executed, output: %s\n", r.Name, r.Content)
-				}
-			}
-			messages = append(messages, Message{Role: "user", Content: feedback.String()})
+
+			// Fix 4: Pass []ToolCallResult directly so buildMessages emits proper
+			// ToolMessage entries instead of a freeform user string.
+			messages = append(messages, Message{Role: "user", Content: results})
 			continue
 		}
 		return nil
 	}
 }
 
-// callLLM non-streaming
-func (a *Agent) callLLM(ctx context.Context, messages []Message, system string) (*openai.ChatCompletion, error) {
-	openaiMsgs := a.buildMessages(messages, system)
-	toolDefs := a.buildToolDefs()
-
-	resp, err := a.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Messages: openaiMsgs,
-		Model:    shared.ChatModel(a.cfg.Model),
-		Tools:    toolDefs,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return resp, nil
-}
-
-// callLLMStream streaming版本
+// callLLMStream streams a completion and reassembles the full choice.
 func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system string) (openai.ChatCompletionChoice, error) {
 	openaiMsgs := a.buildMessages(messages, system)
 	toolDefs := a.buildToolDefs()
@@ -127,7 +108,18 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 	defer stream.Close()
 
 	var fullContent strings.Builder
-	toolCallsMap := make(map[string]openai.ChatCompletionMessageToolCallUnion)
+
+	// Fix 2 & 3: Track tool calls by *index* (not ID) to preserve order and
+	// correctly merge streamed chunks whose later deltas carry an empty ID.
+	type partialToolCall struct {
+		id        string
+		toolType  string
+		name      string
+		arguments strings.Builder
+	}
+	var toolCallOrder []int                      // insertion-order index list
+	toolCallsByIdx := map[int]*partialToolCall{} // index → accumulated data
+
 	var finishReason string
 
 	for stream.Next() {
@@ -137,32 +129,37 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 		}
 
 		delta := event.Choices[0].Delta
-		finishReason = event.Choices[0].FinishReason
 
-		// Accumulate content
+		// Fix 6: Only update finishReason when the field is non-empty so the
+		// last meaningful value is preserved rather than potentially being
+		// overwritten by a blank trailing chunk.
+		if fr := string(event.Choices[0].FinishReason); fr != "" {
+			finishReason = fr
+		}
+
 		if delta.Content != "" {
-			fmt.Print(delta.Content)
+			// fmt.Print(delta.Content)
 			fullContent.WriteString(delta.Content)
 		}
 
-		// Accumulate tool calls from streaming delta, merging by ID
 		for _, tc := range delta.ToolCalls {
-			id := tc.ID
-			if existing, ok := toolCallsMap[id]; ok {
-				// Merge: append arguments to existing entry
-				existing.Function.Arguments += tc.Function.Arguments
-				toolCallsMap[id] = existing
-			} else {
-				// New entry
-				toolCallsMap[id] = openai.ChatCompletionMessageToolCallUnion{
-					ID:   id,
-					Type: tc.Type,
-					Function: openai.ChatCompletionMessageFunctionToolCallFunction{
-						Name:      tc.Function.Name,
-						Arguments: tc.Function.Arguments,
-					},
-				}
+			idx := int(tc.Index)
+			if _, exists := toolCallsByIdx[idx]; !exists {
+				toolCallsByIdx[idx] = &partialToolCall{}
+				toolCallOrder = append(toolCallOrder, idx)
 			}
+			p := toolCallsByIdx[idx]
+			// ID and Name only arrive on the first chunk for each index.
+			if tc.ID != "" {
+				p.id = tc.ID
+			}
+			if tc.Type != "" {
+				p.toolType = string(tc.Type)
+			}
+			if tc.Function.Name != "" {
+				p.name = tc.Function.Name
+			}
+			p.arguments.WriteString(tc.Function.Arguments)
 		}
 	}
 
@@ -170,12 +167,20 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 		return openai.ChatCompletionChoice{}, stream.Err()
 	}
 
-	fmt.Println() // newline after streaming output
+	fmt.Println()
 
-	// Convert map to slice, preserving order
-	toolCalls := make([]openai.ChatCompletionMessageToolCallUnion, 0, len(toolCallsMap))
-	for _, tc := range toolCallsMap {
-		toolCalls = append(toolCalls, tc)
+	// Reassemble tool calls in their original order.
+	toolCalls := make([]openai.ChatCompletionMessageToolCallUnion, 0, len(toolCallOrder))
+	for _, idx := range toolCallOrder {
+		p := toolCallsByIdx[idx]
+		toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnion{
+			ID:   p.id,
+			Type: p.toolType,
+			Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+				Name:      p.name,
+				Arguments: p.arguments.String(),
+			},
+		})
 	}
 
 	return openai.ChatCompletionChoice{
@@ -203,7 +208,19 @@ func (a *Agent) buildMessages(messages []Message, system string) []openai.ChatCo
 			}
 		case "assistant":
 			if content, ok := m.Content.(string); ok {
-				openaiMsgs = append(openaiMsgs, openai.AssistantMessage(content))
+				// Fix 1 (continued): If the assistant turn contained tool calls,
+				// emit them as part of the assistant message so the API receives
+				// a valid history: assistant(tool_calls) → tool(results).
+				if len(m.ToolCalls) > 0 {
+					openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessageParamUnion{
+						OfAssistant: &openai.ChatCompletionAssistantMessageParam{
+							Content:   openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.String(content)},
+							ToolCalls: toToolCallParams(m.ToolCalls),
+						},
+					})
+				} else {
+					openaiMsgs = append(openaiMsgs, openai.AssistantMessage(content))
+				}
 			}
 		}
 	}
@@ -229,12 +246,17 @@ func (a *Agent) buildToolDefs() []openai.ChatCompletionToolUnionParam {
 
 func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUnion) ([]ToolCallResult, error) {
 	var results []ToolCallResult
-	tools := a.registry.EnabledTools()
+	enabledTools := a.registry.EnabledTools()
+
 	for _, tc := range toolCalls {
 		fn := tc.Function
 		if fn.Name == "" {
 			continue
 		}
+
+		// Fix 7: Print the "executing" banner *before* the actual call so the
+		// output reflects what is about to happen, not what already happened.
+		fmt.Printf("\033[33m$ Execute %s(%s)\033[0m\n\n", fn.Name, fn.Arguments)
 
 		var input map[string]any
 		if err := json.Unmarshal([]byte(fn.Arguments), &input); err != nil {
@@ -242,16 +264,16 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 		}
 
 		var output string
-		var execErr error
 		var toolFound bool
-		for _, t := range tools {
-			// Match tool by name and execute
+		for _, t := range enabledTools {
 			if t.Name() == fn.Name {
 				toolFound = true
 				a.logger.Info("Execute tool: %s with args: %+v", t.Name(), input)
-				output, execErr = t.Execute(input)
+				out, execErr := t.Execute(input)
 				if execErr != nil {
 					output = "Error: " + execErr.Error()
+				} else {
+					output = out
 				}
 				break
 			}
@@ -260,19 +282,36 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 			output = fmt.Sprintf("Error: tool %q not found or not enabled", fn.Name)
 		}
 
-		results = append(results, ToolCallResult{
-			Name:       fn.Name,
-			ToolCallID: tc.ID,
-			Content:    output,
-		})
-
-		// Print the command being executed
-		fmt.Printf("\033[33m$ Execute %s(%s)\033[0m\n\n", fn.Name, fn.Arguments)
 		if len(output) > 200 {
 			fmt.Println(output[:200] + "...")
 		} else if output != "" {
 			fmt.Println(output)
 		}
+
+		results = append(results, ToolCallResult{
+			Name:       fn.Name,
+			ToolCallID: tc.ID,
+			Content:    output,
+		})
 	}
 	return results, nil
+}
+
+// toToolCallParams converts response-side ChatCompletionMessageToolCallUnion to the
+// request-side ChatCompletionMessageToolCallUnionParam required by the API param structs.
+func toToolCallParams(tcs []openai.ChatCompletionMessageToolCallUnion) []openai.ChatCompletionMessageToolCallUnionParam {
+	params := make([]openai.ChatCompletionMessageToolCallUnionParam, len(tcs))
+	for i, tc := range tcs {
+		params[i] = openai.ChatCompletionMessageToolCallUnionParam{
+			OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+				ID: tc.ID,
+				Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+				Type: constant.Function(tc.Type),
+			},
+		}
+	}
+	return params
 }
