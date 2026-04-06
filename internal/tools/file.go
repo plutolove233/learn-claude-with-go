@@ -23,7 +23,9 @@ func (f *FileHandler) Name() string {
 }
 
 func (f *FileHandler) Description() string {
-	return "Read and write files on the local filesystem. Use with caution, as it can access any file that the user running the program has access to."
+	return "Read and write files on the local filesystem. Only paths within the current working directory and its subdirectories are allowed." +
+		"Read action returns the content of the file. Write action writes content to the file, creating it if it doesn't exist." +
+		"Input must include 'action' (read or write), 'path', and for write action, 'content'."
 }
 
 func (f *FileHandler) Metadata() ToolMetadata {
