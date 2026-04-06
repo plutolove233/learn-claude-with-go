@@ -13,27 +13,16 @@ const (
 
 // ToolMetadata holds additional information about a tool
 type ToolMetadata struct {
-	Category    ToolCategory
-	SafeToSkip  bool // if true, agent can proceed without this tool
-	MaxRetries  int  // max retry attempts on failure (0 = no retries)
+	Category   ToolCategory
+	SafeToSkip bool // if true, agent can proceed without this tool
+	MaxRetries int  // max retry attempts on failure (0 = no retries)
 }
 
 // Tool is the core interface all tools must implement
 type Tool interface {
 	Name() string
 	Description() string
-	Execute(input map[string]any) (string, error)
+	Execute(input []byte) (string, error)
 	Parameters() map[string]any
 	Metadata() ToolMetadata
-}
-
-// BaseTool provides default metadata for tools
-type BaseTool struct{}
-
-func (BaseTool) Metadata() ToolMetadata {
-	return ToolMetadata{
-		Category:   CategoryExternal,
-		SafeToSkip: false,
-		MaxRetries: 0,
-	}
 }
