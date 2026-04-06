@@ -13,9 +13,42 @@ var dangerousCommands = []string{
 	"sudo",
 	"shutdown",
 	"reboot",
+	"mkfs",
+	"dd if=",
+	":(){:|:&};:",   // fork bomb
+	"curl.*|.*sh",   // pipe curl to sh
+	"wget.*|.*sh",   // pipe wget to sh
 }
 
-type BashTool struct{}
+func isDangerousCommand(cmdStr string) bool {
+	// Normalize: remove quotes, collapse whitespace, convert to lowercase for comparison
+	normalized := strings.ToLower(cmdStr)
+	// Remove various quote styles
+	normalized = strings.ReplaceAll(normalized, "\"", "")
+	normalized = strings.ReplaceAll(normalized, "'", "")
+	normalized = strings.ReplaceAll(normalized, "`", "")
+	// Collapse multiple spaces into one
+	for strings.Contains(normalized, "  ") {
+		normalized = strings.ReplaceAll(normalized, "  ", " ")
+	}
+	normalized = strings.TrimSpace(normalized)
+
+	for _, d := range dangerousCommands {
+		if strings.Contains(normalized, d) {
+			return true
+		}
+	}
+	// Additional check: rm -rf /* or rm -rf //*
+	if strings.HasPrefix(normalized, "rm -rf") &&
+		(strings.Contains(normalized, "/*") || strings.Contains(normalized, "//*")) {
+		return true
+	}
+	return false
+}
+
+type BashTool struct {
+	BaseTool
+}
 
 func NewBashTool() *BashTool {
 	return &BashTool{}
@@ -27,6 +60,14 @@ func (b *BashTool) Name() string {
 
 func (b *BashTool) Description() string {
 	return "Run a shell command in the terminal"
+}
+
+func (b *BashTool) Metadata() ToolMetadata {
+	return ToolMetadata{
+		Category:   CategoryProcess,
+		SafeToSkip: false,
+		MaxRetries: 0,
+	}
 }
 
 func (b *BashTool) Parameters() map[string]any {
@@ -51,10 +92,8 @@ func (b *BashTool) Execute(input map[string]any) (string, error) {
 	if !ok {
 		return "", errors.New("command must be string")
 	}
-	for _, d := range dangerousCommands {
-		if strings.Contains(cmdStr, d) {
-			return "", errors.New("dangerous command blocked")
-		}
+	if isDangerousCommand(cmdStr) {
+		return "", errors.New("dangerous command blocked")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()

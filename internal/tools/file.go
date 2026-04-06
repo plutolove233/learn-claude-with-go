@@ -4,10 +4,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
+var WORKDIR, _ = os.Getwd()
+
 type FileHandler struct {
+	BaseTool
+}
+
+func NewFileHandler() *FileHandler {
+	return &FileHandler{}
 }
 
 func (f *FileHandler) Name() string {
@@ -18,14 +26,27 @@ func (f *FileHandler) Description() string {
 	return "Read and write files on the local filesystem. Use with caution, as it can access any file that the user running the program has access to."
 }
 
-var WORKDIR, _ = os.Getwd()
+func (f *FileHandler) Metadata() ToolMetadata {
+	return ToolMetadata{
+		Category:   CategoryFile,
+		SafeToSkip: false,
+		MaxRetries: 0,
+	}
+}
 
 func safeFilePath(path string) bool {
-	// 如果文件路径在WORKDIR目录下，或者在当前目录的子目录下，则认为是安全的
-	if strings.HasPrefix(path, WORKDIR) || (os.IsPathSeparator(path[0]) || path[0] == '.') {
-		return true
+	// Resolve to absolute path and verify it's within WORKDIR
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
 	}
-	return false
+	absWorkdir, err := filepath.Abs(WORKDIR)
+	if err != nil {
+		return false
+	}
+	// Must be within WORKDIR or its subdirectories
+	return strings.HasPrefix(absPath, absWorkdir+string(filepath.Separator)) ||
+		absPath == absWorkdir
 }
 
 func readfile(path string) (string, error) {
@@ -34,8 +55,7 @@ func readfile(path string) (string, error) {
 }
 
 func writefile(path string, content string) error {
-	os.WriteFile(path, []byte(content), os.ModePerm|os.ModeAppend)
-	return nil
+	return os.WriteFile(path, []byte(content), 0644)
 }
 
 func (f *FileHandler) Execute(input map[string]any) (string, error) {
