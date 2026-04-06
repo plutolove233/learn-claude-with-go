@@ -22,25 +22,24 @@ type Message struct {
 }
 
 type ToolCallResult struct {
-	Role       string `json:"role"`
 	ToolCallID string `json:"tool_call_id"`
 	Name       string `json:"name"`
 	Content    string `json:"content"`
 }
 
 type Agent struct {
-	cfg    *config.Config
-	logger *logger.Logger
-	tools  []tools.Tool
-	client openai.Client
+	cfg      *config.Config
+	logger   *logger.Logger
+	registry *tools.Registry
+	client   openai.Client
 }
 
-func New(cfg *config.Config, l *logger.Logger, toolList []tools.Tool) *Agent {
+func New(cfg *config.Config, l *logger.Logger, r *tools.Registry) *Agent {
 	client := openai.NewClient(
 		option.WithAPIKey(cfg.APIKey),
 		option.WithBaseURL(cfg.BaseURL),
 	)
-	return &Agent{cfg: cfg, logger: l, tools: toolList, client: client}
+	return &Agent{cfg: cfg, logger: l, registry: r, client: client}
 }
 
 func (a *Agent) Run(ctx context.Context, messages []Message) error {
@@ -55,11 +54,6 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 		var err error
 
 		a.logger.Info("User query: %s", messages[len(messages)-1])
-		println()
-		for _, m := range messages {
-			fmt.Printf("%+v\n", m)
-		}
-		fmt.Println()
 		choice, err = a.callLLMStream(ctx, messages, systemPrompt)
 		if err != nil {
 			return fmt.Errorf("LLM call failed: %w", err)
@@ -71,8 +65,9 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 		// Append assistant message
 		messages = append(messages, Message{Role: "assistant", Content: choice.Message.Content})
 
-		// No tool calls - output final response
-		if choice.Message.Content != "" {
+		// when output final response
+		if choice.FinishReason == "stop" {
+			println("\n\nFinal response:")
 			fmt.Println(choice.Message.Content)
 			return nil
 		}
@@ -132,7 +127,7 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 	defer stream.Close()
 
 	var fullContent strings.Builder
-	var toolCalls []openai.ChatCompletionMessageToolCallUnion
+	toolCallsMap := make(map[string]openai.ChatCompletionMessageToolCallUnion)
 	var finishReason string
 
 	for stream.Next() {
@@ -150,17 +145,24 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 			fullContent.WriteString(delta.Content)
 		}
 
-		// Accumulate tool calls from streaming delta
+		// Accumulate tool calls from streaming delta, merging by ID
 		for _, tc := range delta.ToolCalls {
-			// Convert ChatCompletionChunkChoiceDeltaToolCall to ChatCompletionMessageToolCallUnion
-			toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnion{
-				ID:   tc.ID,
-				Type: tc.Type,
-				Function: openai.ChatCompletionMessageFunctionToolCallFunction{
-					Name:      tc.Function.Name,
-					Arguments: tc.Function.Arguments,
-				},
-			})
+			id := tc.ID
+			if existing, ok := toolCallsMap[id]; ok {
+				// Merge: append arguments to existing entry
+				existing.Function.Arguments += tc.Function.Arguments
+				toolCallsMap[id] = existing
+			} else {
+				// New entry
+				toolCallsMap[id] = openai.ChatCompletionMessageToolCallUnion{
+					ID:   id,
+					Type: tc.Type,
+					Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					},
+				}
+			}
 		}
 	}
 
@@ -169,6 +171,12 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 	}
 
 	fmt.Println() // newline after streaming output
+
+	// Convert map to slice, preserving order
+	toolCalls := make([]openai.ChatCompletionMessageToolCallUnion, 0, len(toolCallsMap))
+	for _, tc := range toolCallsMap {
+		toolCalls = append(toolCalls, tc)
+	}
 
 	return openai.ChatCompletionChoice{
 		Message: openai.ChatCompletionMessage{
@@ -203,12 +211,13 @@ func (a *Agent) buildMessages(messages []Message, system string) []openai.ChatCo
 }
 
 func (a *Agent) buildToolDefs() []openai.ChatCompletionToolUnionParam {
-	if len(a.tools) == 0 {
+	tools := a.registry.EnabledTools()
+	if len(tools) == 0 {
 		return nil
 	}
 
-	toolDefs := make([]openai.ChatCompletionToolUnionParam, len(a.tools))
-	for i, t := range a.tools {
+	toolDefs := make([]openai.ChatCompletionToolUnionParam, len(tools))
+	for i, t := range tools {
 		toolDefs[i] = openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
 			Name:        t.Name(),
 			Description: openai.String(t.Description()),
@@ -220,6 +229,7 @@ func (a *Agent) buildToolDefs() []openai.ChatCompletionToolUnionParam {
 
 func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUnion) ([]ToolCallResult, error) {
 	var results []ToolCallResult
+	tools := a.registry.EnabledTools()
 	for _, tc := range toolCalls {
 		fn := tc.Function
 		if fn.Name == "" {
@@ -233,9 +243,11 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 
 		var output string
 		var execErr error
-		for _, t := range a.tools {
+		var toolFound bool
+		for _, t := range tools {
 			// Match tool by name and execute
 			if t.Name() == fn.Name {
+				toolFound = true
 				a.logger.Info("Execute tool: %s with args: %+v", t.Name(), input)
 				output, execErr = t.Execute(input)
 				if execErr != nil {
@@ -244,9 +256,11 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 				break
 			}
 		}
+		if !toolFound {
+			output = fmt.Sprintf("Error: tool %q not found or not enabled", fn.Name)
+		}
 
 		results = append(results, ToolCallResult{
-			Role:       "tool",
 			Name:       fn.Name,
 			ToolCallID: tc.ID,
 			Content:    output,
