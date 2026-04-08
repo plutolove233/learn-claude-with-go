@@ -3,6 +3,7 @@ package tests
 import (
 	"claudego/internal/tools"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -21,7 +22,10 @@ func TestBashTool(t *testing.T) {
 	}
 
 	_, err = tool.Execute(inputBytes)
-	if err != nil {
-		t.Fatalf("bash tool execution failed: %v", err)
+	if err == nil {
+		t.Fatal("expected dangerous command to be rejected")
+	}
+	if !strings.Contains(err.Error(), "dangerous command detected") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
