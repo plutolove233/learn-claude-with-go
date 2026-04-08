@@ -4,21 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func TestLogger(t *testing.T) {
-	tmpDir := filepath.Join(os.TempDir(), "claudego-log-test")
-	os.MkdirAll(tmpDir, 0755)
-	defer os.RemoveAll(tmpDir)
-
-	filename := time.Now().Format("2006-01-02 15-04-05") + ".json"
-	f, err := os.Create(filepath.Join(tmpDir, filename))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-
 	log := GetLogger()
 	log.Info("Hello")
 }
