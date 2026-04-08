@@ -14,6 +14,7 @@ import (
 	"claudego/internal/config"
 	"claudego/internal/tools"
 	"claudego/pkg/logger"
+	"claudego/pkg/ui"
 )
 
 type Message struct {
@@ -72,7 +73,7 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 		})
 
 		if choice.FinishReason == "stop" {
-			println("\n\nFinal response:")
+			ui.Info("Final response:")
 			fmt.Println(choice.Message.Content)
 			return nil
 		}
@@ -255,7 +256,7 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 
 		// Fix 7: Print the "executing" banner *before* the actual call so the
 		// output reflects what is about to happen, not what already happened.
-		fmt.Printf("\033[33m$ Execute %s(%s)\033[0m\n\n", fn.Name, fn.Arguments)
+		ui.Info(fmt.Sprintf("$ Execute %s(%s)", fn.Name, fn.Arguments))
 
 		input := []byte(fn.Arguments)
 
@@ -264,7 +265,6 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 		for _, t := range enabledTools {
 			if t.Name() == fn.Name {
 				toolFound = true
-				a.logger.Info("Execute tool: %s with args: %+v", t.Name(), input)
 				out, execErr := t.Execute(input)
 				if execErr != nil {
 					output = "Error: " + execErr.Error()
@@ -278,10 +278,19 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 			output = fmt.Sprintf("Error: tool %q not found or not enabled", fn.Name)
 		}
 
-		if len(output) > 200 {
-			fmt.Println(output[:200] + "...")
-		} else if output != "" {
-			fmt.Println(output)
+		// Block-style output with indentation and tree indicator (like Claude Code)
+		indent := "  "
+		if output != "" {
+			lines := strings.Split(output, "\n")
+			for i, line := range lines {
+				if i == 0 {
+					// First line with tree indicator
+					fmt.Printf("%s%c %s\n", indent, '⎿', line)
+				} else {
+					// Continuation lines
+					fmt.Printf("%s  %s\n", indent, line)
+				}
+			}
 		}
 
 		results = append(results, ToolCallResult{

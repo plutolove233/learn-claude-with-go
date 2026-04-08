@@ -15,6 +15,7 @@ import (
 	"claudego/internal/plan"
 	"claudego/internal/tools"
 	"claudego/pkg/logger"
+	"claudego/pkg/ui"
 )
 
 func main() {
@@ -27,7 +28,6 @@ func main() {
 	}
 
 	log := logger.GetLogger()
-	defer log.Close()
 
 	// Register default tools and get the registry
 	tools.RegisterDefaults()
@@ -55,8 +55,7 @@ func main() {
 		}
 	}()
 
-	fmt.Println("ClaudeGo Agent (type 'q' to quit, '/plan' for plan commands)")
-	fmt.Println("=")
+	ui.Box("ClaudeGo Agent", "Type 'q' to quit, '/plan' for plan commands")
 
 	line := liner.NewLiner()
 	defer line.Close()
@@ -87,7 +86,7 @@ func main() {
 
 		// Auto-plan mode: check if this is a complex task that needs planning
 		if isComplexTask(query) {
-			fmt.Println("\033[36m🔍 Detected complex task - entering plan mode...\033[0m")
+			ui.Info("Detected complex task - entering plan mode...")
 			if _, err := executor.RunWithPlan(ctx, query); err != nil {
 				log.Warning("Plan execution failed: %v", err)
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -125,7 +124,7 @@ func handlePlanCommand(ctx context.Context, executor *plan.Executor, cmd string)
 			fmt.Println("No plans found.")
 			return
 		}
-		fmt.Println("\033[36m📋 Plans:\033[0m")
+		ui.Info("Plans:")
 		for _, p := range plans {
 			fmt.Printf("  %s - %s (%s) [%s]\n", p.ID, p.Name, p.Goal, p.Status)
 		}
@@ -140,7 +139,7 @@ func handlePlanCommand(ctx context.Context, executor *plan.Executor, cmd string)
 			fmt.Fprintf(os.Stderr, "Error loading plan: %v\n", err)
 			return
 		}
-		fmt.Printf("\033[36mResuming plan: %s\033[0m\n", p.Name)
+		ui.Info(fmt.Sprintf("Resuming plan: %s", p.Name))
 		if err := executor.ResumePlan(ctx, p); err != nil {
 			fmt.Fprintf(os.Stderr, "Error resuming plan: %v\n", err)
 		}
@@ -163,7 +162,7 @@ func handlePlanCommand(ctx context.Context, executor *plan.Executor, cmd string)
 }
 
 func printPlanHelp() {
-	fmt.Println("\033[36mPlan Commands:\033[0m")
+	ui.Info("Plan Commands:")
 	fmt.Println("  /plan list              - List all plans")
 	fmt.Println("  /plan resume <id>       - Resume a paused plan")
 	fmt.Println("  /plan status <id>       - Show plan status")

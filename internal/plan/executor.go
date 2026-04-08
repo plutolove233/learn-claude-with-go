@@ -16,6 +16,7 @@ import (
 	"claudego/internal/loop"
 	"claudego/internal/tools"
 	"claudego/pkg/logger"
+	"claudego/pkg/ui"
 )
 
 type Executor struct {
@@ -75,7 +76,8 @@ func (e *Executor) RunWithPlan(ctx context.Context, goal string) (*Plan, error) 
 	}
 
 	// Create the plan using the LLM
-	fmt.Print("\033[36m📋 Analyzing task and creating plan...\033[0m\n\n")
+	ui.Info("Analyzing task and creating plan...")
+	fmt.Println()
 	plan, err := e.planner.CreatePlan(ctx, PlanningRequest{Goal: goal, PWD: pwd})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plan: %w", err)
@@ -95,7 +97,8 @@ func (e *Executor) RunWithPlan(ctx context.Context, goal string) (*Plan, error) 
 		e.logger.Warning("Failed to save plan: %v", err)
 	}
 
-	fmt.Print("\033[36m🚀 Starting execution...\033[0m\n\n")
+	ui.Info("Starting execution...")
+	fmt.Println()
 	if err := e.executePlan(ctx, plan); err != nil {
 		plan.Status = PlanStatusFailed
 		plan.Save()
@@ -126,7 +129,8 @@ func (e *Executor) ResumePlan(ctx context.Context, plan *Plan) error {
 		e.logger.Warning("Failed to save plan: %v", err)
 	}
 
-	fmt.Print("\033[36m🚀 Resuming execution...\033[0m\n\n")
+	ui.Info("Resuming execution...")
+	fmt.Println()
 	if err := e.executePlan(ctx, plan); err != nil {
 		plan.Status = PlanStatusPaused
 		if saveErr := plan.Save(); saveErr != nil {
@@ -159,7 +163,9 @@ func (e *Executor) executePlan(ctx context.Context, plan *Plan) error {
 		plan.CurrentStep = i
 		plan.Save()
 
-		fmt.Printf("\033[33m\n📌 Step %d/%d: %s\033[0m\n\n", i+1, len(plan.Steps), step.Task)
+		fmt.Println()
+		ui.Step(i+1, len(plan.Steps), step.Task)
+		fmt.Println()
 
 		// Mark step as started
 		now := time.Now()
@@ -175,10 +181,10 @@ func (e *Executor) executePlan(ctx context.Context, plan *Plan) error {
 			now = time.Now()
 			step.CompletedAt = &now
 			plan.Save()
-			fmt.Printf("\033[31m❌ Step failed: %v\033[0m\n", err)
+			ui.Error(fmt.Sprintf("Step failed: %v", err))
 
 			// Ask if user wants to continue
-			fmt.Println("\033[33m⚠️  Plan execution paused. Changes have been saved.\033[0m")
+			ui.Warning("Plan execution paused. Changes have been saved.")
 			fmt.Println("You can resume later with /plan resume")
 			return err
 		}
@@ -190,7 +196,8 @@ func (e *Executor) executePlan(ctx context.Context, plan *Plan) error {
 		step.CompletedAt = &now
 		plan.Save()
 
-		fmt.Printf("\033[32m✅ Step completed\033[0m\n\n")
+		ui.Success("Step completed")
+		fmt.Println()
 	}
 	return nil
 }
@@ -329,7 +336,8 @@ func (e *Executor) executeTools(ctx context.Context, toolCalls []openai.ChatComp
 			continue
 		}
 
-		fmt.Printf("\033[33m$ Execute %s(%s)\033[0m\n\n", fn.Name, fn.Arguments)
+		ui.Info(fmt.Sprintf("$ Execute %s(%s)", fn.Name, fn.Arguments))
+		fmt.Println()
 
 		input := []byte(fn.Arguments)
 		var output string
@@ -352,11 +360,7 @@ func (e *Executor) executeTools(ctx context.Context, toolCalls []openai.ChatComp
 			output = fmt.Sprintf("Error: tool %q not found or not enabled", fn.Name)
 		}
 
-		if len(output) > 200 {
-			fmt.Println(output[:200] + "...")
-		} else if output != "" {
-			fmt.Println(output)
-		}
+		ui.ToolOutput(output)
 
 		results = append(results, loop.ToolCallResult{
 			Name:       fn.Name,
@@ -434,48 +438,40 @@ func (e *Executor) buildToolDefs() []openai.ChatCompletionToolUnionParam {
 }
 
 func (e *Executor) DisplayPlan(plan *Plan) {
-	fmt.Println("\033[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
-	fmt.Printf("\033[36m📋 Plan: %s\033[0m\n", plan.Name)
-	fmt.Printf("\033[36m🎯 Goal: %s\033[0m\n", plan.Goal)
-	fmt.Println("\033[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
-	fmt.Println("\033[36mSteps:\033[0m")
+	ui.Divider()
+	ui.Box("Plan: "+plan.Name, plan.Goal)
+	fmt.Println()
+	fmt.Println("Steps:")
 	for i, step := range plan.Steps {
-		fmt.Printf("  \033[33m%d.\033[0m %s\n", i+1, step.Task)
+		fmt.Printf("  %d. %s\n", i+1, step.Task)
 	}
-	fmt.Print("\033[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n\n")
+	fmt.Println()
+	ui.Divider()
+	fmt.Println()
 }
 
 func (e *Executor) displaySummary(plan *Plan) {
-	fmt.Println("\033[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m")
-	fmt.Printf("\033[36m📊 Plan '%s' - Execution Summary\033[0m\n", plan.Name)
+	ui.Divider()
+	ui.Info(fmt.Sprintf("Plan '%s' - Execution Summary", plan.Name))
 
 	total := len(plan.Steps)
 	completed := 0
 	failed := 0
 
 	for i, step := range plan.Steps {
-		var icon string
-		var color string
 		switch step.Status {
 		case StepStatusCompleted:
-			icon = "✅"
-			color = "32"
 			completed++
 		case StepStatusFailed:
-			icon = "❌"
-			color = "31"
 			failed++
-		default:
-			icon = "⏳"
-			color = "33"
 		}
-		status := fmt.Sprintf("\033[%sm%s\033[0m", color, step.Status)
-		fmt.Printf("  %s Step %d: %s (%s)\n", icon, i+1, step.Task, status)
+		fmt.Printf("  Step %d: %s [%s]\n", i+1, step.Task, step.Status)
 	}
 
 	fmt.Println()
-	fmt.Printf("\033[32mCompleted: %d\033[0m | \033[31mFailed: %d\033[0m | Total: %d\n", completed, failed, total)
-	fmt.Print("\033[36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m\n\n")
+	fmt.Printf("Completed: %d | Failed: %d | Total: %d\n", completed, failed, total)
+	ui.Divider()
+	fmt.Println()
 }
 
 func truncate(s string, maxLen int) string {
