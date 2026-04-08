@@ -33,4 +33,6 @@ go.work.sum
 docs/superpowers/
 claudego
 demo
+.DS_Store
+.omc
 
