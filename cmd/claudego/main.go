@@ -55,7 +55,8 @@ func main() {
 		}
 	}()
 
-	ui.Box("ClaudeGo Agent", "Type 'q' to quit, '/plan' for plan commands")
+	cwd, _ := os.Getwd()
+	ui.Welcome("ClaudeGo Agent", "v1.0", cwd)
 
 	line := liner.NewLiner()
 	defer line.Close()

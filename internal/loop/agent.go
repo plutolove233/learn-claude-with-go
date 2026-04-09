@@ -175,7 +175,7 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 		}
 	}
 
-	stopSpin <- struct{}{}
+	close(stopSpin)
 	if stream.Err() != nil {
 		return openai.ChatCompletionChoice{}, stream.Err()
 	}
