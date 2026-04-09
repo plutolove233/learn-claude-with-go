@@ -16,6 +16,7 @@ import (
 	"claudego/internal/tools"
 	"claudego/pkg/logger"
 	"claudego/pkg/ui"
+	"claudego/utils"
 )
 
 func main() {
@@ -56,7 +57,8 @@ func main() {
 	}()
 
 	cwd, _ := os.Getwd()
-	ui.Welcome("ClaudeGo Agent", "v1.0", cwd)
+	cwd, _ = utils.AbsToTilde(cwd)
+	ui.Welcome("ClaudeGo Agent", "v1.0", cfg.Model, cwd)
 
 	line := liner.NewLiner()
 	defer line.Close()

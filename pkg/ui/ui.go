@@ -152,63 +152,68 @@ func wrapText(text string, maxWidth int) []string {
 	return lines
 }
 
-
 // ui.go 中新增
 
-func Welcome(name, version, cwd string) {
-    const innerWidth = 36 // 边框内宽度，可按需调整
+func Welcome(name, version, model string, cwd string) {
+	const innerWidth = 64 // 边框内宽度，可按需调整
 
-    // cwd 过长时截断，保留末尾部分
-    if runewidth.StringWidth(cwd) > innerWidth-2 {
-        runes := []rune(cwd)
-        for runewidth.StringWidth("…"+string(runes)) > innerWidth-2 {
-            runes = runes[1:]
-        }
-        cwd = "…" + string(runes)
-    }
+	// cwd 过长时截断，保留末尾部分
+	if runewidth.StringWidth(cwd) > innerWidth-2 {
+		runes := []rune(cwd)
+		for runewidth.StringWidth("…"+string(runes)) > innerWidth-2 {
+			runes = runes[1:]
+		}
+		cwd = "…" + string(runes)
+	}
 
-    top    := ColorMuted + "╭" + strings.Repeat("─", innerWidth) + "╮" + Reset
-    bottom := ColorMuted + "╰" + strings.Repeat("─", innerWidth) + "╯" + Reset
+	top := ColorMuted + "╭" + strings.Repeat("─", innerWidth) + "╮" + Reset
+	bottom := ColorMuted + "╰" + strings.Repeat("─", innerWidth) + "╯" + Reset
 
-    // 第一行：✻ 名称  版本
-    icon    := ColorTitle + "✻ " + name + Reset
-    ver     := ColorMuted + version + Reset
-    nameVer := icon + "  " + ver
-    row1    := borderRow(nameVer, innerWidth)
+	// 第一行：✻ 名称  版本
+	icon := ColorTitle + "✻ " + name + Reset
+	ver := ColorMuted + version + Reset
+	nameVer := icon + "  " + ver
+	row1 := borderRow(nameVer, innerWidth)
 
-    // 第二行：空行
-    row2 := borderRow("", innerWidth)
+	// 第二行：空行
+	row2 := borderRow("", innerWidth)
 
-    // 第三行：工作目录
-    row3 := borderRow(ColorMuted+cwd+Reset, innerWidth)
+	// 第三行：模型名
+	modelInfo := ColorMuted + "model: " + Reset + ColorDefault + model + Reset
+	row3 := borderRow(modelInfo, innerWidth)
 
-    fmt.Println()
-    fmt.Println(top)
-    fmt.Println(row1)
-    fmt.Println(row2)
-    fmt.Println(row3)
-    fmt.Println(bottom)
+	// 第四行：工作目录
+	work_path := ColorMuted + "directory: " + Reset + ColorDefault + cwd + Reset
+	row4 := borderRow(work_path, innerWidth)
 
-    // 快捷键提示
-    dot := ColorMuted + " · " + Reset
-    hint := func(key, desc string) string {
-        return ColorMuted+key+Reset + " " + ColorTitle+desc+Reset
-    }
-    fmt.Println()
-    fmt.Println("  " +
-        hint("/plan", "for plan mode") + dot +
-        hint("q", "to quit") + dot +
-        hint("?", "for help"),
-    )
-    fmt.Println()
+	fmt.Println()
+	fmt.Println(top)
+	fmt.Println(row1)
+	fmt.Println(row2)
+	fmt.Println(row3)
+	fmt.Println(row4)
+	fmt.Println(bottom)
+
+	// 快捷键提示
+	dot := ColorMuted + " · " + Reset
+	hint := func(key, desc string) string {
+		return ColorMuted + key + Reset + " " + ColorTitle + desc + Reset
+	}
+	fmt.Println()
+	fmt.Println("  " +
+		hint("/plan", "for plan mode") + dot +
+		hint("q", "to quit") + dot +
+		hint("?", "for help"),
+	)
+	fmt.Println()
 }
 
 // borderRow 把内容放在 │ │ 之间，右侧用空格补齐
 func borderRow(content string, innerWidth int) string {
-    visible := visibleWidth(content)
-    pad := innerWidth - visible - 1 // 左侧 1 空格
-    if pad < 0 {
-        pad = 0
-    }
-    return ColorMuted+"│"+Reset+" "+content+strings.Repeat(" ", pad)+ColorMuted+"│"+Reset
+	visible := visibleWidth(content)
+	pad := innerWidth - visible - 1 // 左侧 1 空格
+	if pad < 0 {
+		pad = 0
+	}
+	return ColorMuted + "│" + Reset + " " + content + strings.Repeat(" ", pad) + ColorMuted + "│" + Reset
 }
