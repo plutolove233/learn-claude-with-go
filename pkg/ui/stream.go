@@ -147,22 +147,21 @@ func (s *AssistantStreamer) writeVisible(content string) {
 	for i, line := range lines {
 		isLast := i == len(lines)-1
 
-		// Bug fix: firstLine 时遇到空行，跳过，不消耗 firstLine
-		// 否则前导 \n 会打出一堆空的 ⎿ 行
 		if s.firstLine && line == "" {
 			continue
 		}
 
 		if s.firstLine {
 			if !s.atLineStart {
-				fmt.Println() // 收尾 spinner 所在行
+				fmt.Println()
 			}
 			fmt.Print("  " + paint("⎿", s.renderer.Theme.Inactive, "") + "  " + line)
 			s.firstLine = false
 			s.atLineStart = false
 		} else if line != "" {
 			if s.atLineStart {
-				fmt.Print("  " + paint("⎿", s.renderer.Theme.Inactive, "") + "  " + line)
+				// 后续行只缩进，不重复打印 ⎿
+				fmt.Print("     " + line)
 			} else {
 				fmt.Print(line)
 			}
