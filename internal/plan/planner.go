@@ -93,6 +93,14 @@ Goal: "Refactor the logging system to use logrus"
 	// Parse the response to extract JSON
 	response := fullContent.String()
 	response = strings.TrimSpace(response)
+	// 删去被<think></think>包裹的内容，因为它们不是JSON的一部分
+	if strings.Contains(response, "<think>") && strings.Contains(response, "</think>") {
+		start := strings.Index(response, "<think>") + len("<think>")
+		end := strings.Index(response, "</think>")
+		if end > start {
+			response = response[:strings.Index(response, "<think>")] + response[end+len("</think>"):]
+		}
+	}
 
 	// Try to extract JSON from markdown code blocks if present
 	if strings.Contains(response, "```json") {

@@ -8,13 +8,13 @@ import (
 )
 
 const (
-	ColorTitle   = "\033[38;2;215;119;87m"
-	ColorDefault = "\033[38;2;235;235;235m"
-	ColorWarning = "\033[38;2;230;185;90m"
-	ColorSuccess = "\033[38;2;105;219;124m"
-	ColorError   = "\033[38;2;220;95;105m"
-	ColorMuted   = "\033[38;2;150;150;150m"
-	Reset        = "\033[0m"
+	ColorTitle   = "38;2;215;119;87"
+	ColorDefault = "38;2;235;235;235"
+	ColorWarning = "38;2;230;185;90"
+	ColorSuccess = "38;2;105;219;124"
+	ColorError   = "38;2;220;95;105"
+	ColorMuted   = "38;2;150;150;150"
+	Reset       = "0"
 )
 
 const (
@@ -46,35 +46,26 @@ func Box(title, content string) {
 		}
 	}
 
-	topBorder := BorderTopLeft + strings.Repeat(BorderHorizontal, width-2) + BorderTopRight
-	bottomBorder := BorderBottomLeft + strings.Repeat(BorderHorizontal, width-2) + BorderBottomRight
+	topBorder := paint(BorderTopLeft+strings.Repeat(BorderHorizontal, width-2)+BorderTopRight, ColorTitle, "")
+	bottomBorder := paint(BorderBottomLeft+strings.Repeat(BorderHorizontal, width-2)+BorderBottomRight, ColorTitle, "")
+	titleBar := paint(BorderVertical+" "+padRight(title, width-4)+" "+BorderVertical, ColorTitle, "")
+	divider := paint(BorderCross+" "+strings.Repeat(BorderHorizontal, width-2), ColorMuted, "")
 
-	fmt.Println(ColorTitle + topBorder + Reset)
-	fmt.Printf("%s %s%s%s\n",
-		ColorTitle+BorderVertical+Reset,
-		ColorTitle,
-		padRight(title, width-4),
-		ColorTitle+BorderVertical+Reset,
-	)
-	fmt.Printf("%s%s %s%s\n", ColorMuted+BorderCross+Reset, ColorMuted, strings.Repeat(BorderHorizontal, width-2), Reset)
+	fmt.Println(topBorder)
+	fmt.Println(titleBar)
+	fmt.Println(divider)
 
 	lines := wrapText(content, width-4)
 	for _, line := range lines {
-		fmt.Printf("%s %s%s%s\n",
-			ColorDefault+BorderVertical+Reset,
-			ColorDefault,
-			padRight(line, width-4),
-			ColorTitle+BorderVertical+Reset,
-		)
+		fmt.Println(paint(BorderVertical+" "+padRight(line, width-4)+" "+BorderVertical, ColorDefault, ""))
 	}
 
-	fmt.Println(ColorTitle + bottomBorder + Reset)
+	fmt.Println(bottomBorder)
 }
 
 func Step(num, total int, text string) {
 	label := fmt.Sprintf("Step %d/%d:", num, total)
-	fmt.Printf("%s[%s%s %s%s]%s %s\n",
-		ColorTitle, ColorDefault, label, ColorTitle, ColorMuted, Reset, text)
+	fmt.Println(paint("["+label+"]", ColorTitle, "") + " " + text)
 }
 
 func Success(msg string) {
@@ -114,11 +105,11 @@ func ToolCall(name, args string) {
 	if lineWidth < 0 {
 		lineWidth = 0
 	}
-	top := ColorMuted + "┌" + label + strings.Repeat("─", lineWidth) + "┐" + Reset
-	bot := ColorMuted + "└" + strings.Repeat("─", width-2) + "┘" + Reset
+	top := paint("┌"+label+strings.Repeat("─", lineWidth)+"┐", ColorMuted, "")
+	bot := paint("└"+strings.Repeat("─", width-2)+"┘", ColorMuted, "")
 	fmt.Println(top)
 	for _, line := range wrapText(args, width-4) {
-		fmt.Printf("%s %s%s%s\n", ColorMuted+BorderVertical+Reset, ColorDefault, padRight(line, width-4), ColorMuted+BorderVertical+Reset)
+		fmt.Println(paint(BorderVertical+" "+padRight(line, width-4)+" "+BorderVertical, ColorDefault, ""))
 	}
 	fmt.Println(bot)
 }
@@ -166,12 +157,12 @@ func Welcome(name, version, model string, cwd string) {
 		cwd = "…" + string(runes)
 	}
 
-	top := ColorMuted + "╭" + strings.Repeat("─", innerWidth) + "╮" + Reset
-	bottom := ColorMuted + "╰" + strings.Repeat("─", innerWidth) + "╯" + Reset
+	top := paint("╭"+strings.Repeat("─", innerWidth)+"╮", ColorMuted, "")
+	bottom := paint("╰"+strings.Repeat("─", innerWidth)+"╯", ColorMuted, "")
 
 	// 第一行：✻ 名称  版本
-	icon := ColorTitle + "✻ " + name + Reset
-	ver := ColorMuted + version + Reset
+	icon := paint("✻ "+name, ColorTitle, "")
+	ver := paint(version, ColorMuted, "")
 	nameVer := icon + "  " + ver
 	row1 := borderRow(nameVer, innerWidth)
 
@@ -179,11 +170,11 @@ func Welcome(name, version, model string, cwd string) {
 	row2 := borderRow("", innerWidth)
 
 	// 第三行：模型名
-	modelInfo := ColorMuted + "model: " + Reset + ColorDefault + model + Reset
+	modelInfo := paint("model: ", ColorMuted, "") + paint(model, ColorDefault, "")
 	row3 := borderRow(modelInfo, innerWidth)
 
 	// 第四行：工作目录
-	work_path := ColorMuted + "directory: " + Reset + ColorDefault + cwd + Reset
+	work_path := paint("directory: ", ColorMuted, "") + paint(cwd, ColorDefault, "")
 	row4 := borderRow(work_path, innerWidth)
 
 	fmt.Println()
@@ -195,9 +186,9 @@ func Welcome(name, version, model string, cwd string) {
 	fmt.Println(bottom)
 
 	// 快捷键提示
-	dot := ColorMuted + " · " + Reset
+	dot := paint(" · ", ColorMuted, "")
 	hint := func(key, desc string) string {
-		return ColorMuted + key + Reset + " " + ColorTitle + desc + Reset
+		return paint(key, ColorMuted, "") + " " + paint(desc, ColorTitle, "")
 	}
 	fmt.Println()
 	fmt.Println("  " +
@@ -215,5 +206,5 @@ func borderRow(content string, innerWidth int) string {
 	if pad < 0 {
 		pad = 0
 	}
-	return ColorMuted + "│" + Reset + " " + content + strings.Repeat(" ", pad) + ColorMuted + "│" + Reset
+	return paint("│ ", ColorMuted, "") + content + strings.Repeat(" ", pad) + paint("│", ColorMuted, "")
 }
