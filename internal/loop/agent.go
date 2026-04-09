@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -73,8 +74,6 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 		})
 
 		if choice.FinishReason == "stop" {
-			ui.Info("Final response:")
-			fmt.Println(choice.Message.Content)
 			return nil
 		}
 
@@ -108,6 +107,20 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 	defer stream.Close()
 
 	var fullContent strings.Builder
+	assistantStream := ui.NewAssistantStreamer()
+	stopSpin := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stopSpin:
+				return
+			case <-time.After(80 * time.Millisecond):
+				if frame := assistantStream.Spin(); frame != "" {
+					fmt.Print("\r  " + frame + "  ")
+				}
+			}
+		}
+	}()
 
 	// Fix 2 & 3: Track tool calls by *index* (not ID) to preserve order and
 	// correctly merge streamed chunks whose later deltas carry an empty ID.
@@ -138,8 +151,7 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 		}
 
 		if delta.Content != "" {
-			// fmt.Print(delta.Content)
-			fullContent.WriteString(delta.Content)
+			fullContent.WriteString(assistantStream.Write(delta.Content))
 		}
 
 		for _, tc := range delta.ToolCalls {
@@ -163,11 +175,11 @@ func (a *Agent) callLLMStream(ctx context.Context, messages []Message, system st
 		}
 	}
 
+	stopSpin <- struct{}{}
 	if stream.Err() != nil {
 		return openai.ChatCompletionChoice{}, stream.Err()
 	}
-
-	fmt.Println()
+	fullContent.WriteString(assistantStream.Finish())
 
 	// Reassemble tool calls in their original order.
 	toolCalls := make([]openai.ChatCompletionMessageToolCallUnion, 0, len(toolCallOrder))
@@ -256,7 +268,7 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 
 		// Fix 7: Print the "executing" banner *before* the actual call so the
 		// output reflects what is about to happen, not what already happened.
-		ui.Info(fmt.Sprintf("$ Execute %s(%s)", fn.Name, fn.Arguments))
+		ui.ToolCall(fn.Name, fn.Arguments)
 
 		input := []byte(fn.Arguments)
 
@@ -278,20 +290,7 @@ func (a *Agent) executeTools(toolCalls []openai.ChatCompletionMessageToolCallUni
 			output = fmt.Sprintf("Error: tool %q not found or not enabled", fn.Name)
 		}
 
-		// Block-style output with indentation and tree indicator (like Claude Code)
-		indent := "  "
-		if output != "" {
-			lines := strings.Split(output, "\n")
-			for i, line := range lines {
-				if i == 0 {
-					// First line with tree indicator
-					fmt.Printf("%s%c %s\n", indent, '⎿', line)
-				} else {
-					// Continuation lines
-					fmt.Printf("%s  %s\n", indent, line)
-				}
-			}
-		}
+		ui.ToolOutput(output)
 
 		results = append(results, ToolCallResult{
 			Name:       fn.Name,

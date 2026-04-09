@@ -7,18 +7,16 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// Color constants (Claude Code style)
 const (
-	ColorTitle   = "\033[36m" // Cyan - headers, important labels
-	ColorDefault = "\033[37m" // White - regular text
-	ColorWarning = "\033[33m" // Orange - warnings
-	ColorSuccess = "\033[32m" // Green - success messages
-	ColorError   = "\033[31m" // Red - error messages
-	ColorMuted   = "\033[90m" // Gray - timestamps, hints
+	ColorTitle   = "\033[38;2;215;119;87m"
+	ColorDefault = "\033[38;2;235;235;235m"
+	ColorWarning = "\033[38;2;230;185;90m"
+	ColorSuccess = "\033[38;2;105;219;124m"
+	ColorError   = "\033[38;2;220;95;105m"
+	ColorMuted   = "\033[38;2;150;150;150m"
 	Reset        = "\033[0m"
 )
 
-// Border characters (simple lines)
 const (
 	BorderTopLeft     = "┌"
 	BorderTopRight    = "┐"
@@ -31,10 +29,8 @@ const (
 	BorderUpT         = "┴"
 )
 
-// DefaultWidth is the default box width
 const DefaultWidth = 45
 
-// Box prints a titled box with content
 func Box(title, content string) {
 	width := DefaultWidth
 
@@ -62,7 +58,6 @@ func Box(title, content string) {
 	)
 	fmt.Printf("%s%s %s%s\n", ColorMuted+BorderCross+Reset, ColorMuted, strings.Repeat(BorderHorizontal, width-2), Reset)
 
-	// Print content lines (wrap if needed)
 	lines := wrapText(content, width-4)
 	for _, line := range lines {
 		fmt.Printf("%s %s%s%s\n",
@@ -76,78 +71,58 @@ func Box(title, content string) {
 	fmt.Println(ColorTitle + bottomBorder + Reset)
 }
 
-// Step prints a step indicator: "Step 1/4: description"
 func Step(num, total int, text string) {
 	label := fmt.Sprintf("Step %d/%d:", num, total)
 	fmt.Printf("%s[%s%s %s%s]%s %s\n",
 		ColorTitle, ColorDefault, label, ColorTitle, ColorMuted, Reset, text)
 }
 
-// Success prints a success message
 func Success(msg string) {
 	fmt.Printf("%s✓ %s%s\n", ColorSuccess, Reset, msg)
 }
 
-// Error prints an error message
 func Error(msg string) {
 	fmt.Printf("%s✗ %s%s\n", ColorError, Reset, msg)
 }
 
-// Warning prints a warning message
 func Warning(msg string) {
 	fmt.Printf("%s⚠ %s%s\n", ColorWarning, Reset, msg)
 }
 
-// Info prints an info message
 func Info(msg string) {
 	fmt.Printf("%s%s%s\n", ColorTitle, msg, Reset)
 }
 
-// Divider prints a horizontal divider line
 func Divider() {
 	fmt.Printf("%s%s%s\n", ColorMuted, strings.Repeat("─", 45), Reset)
 }
 
-// ToolOutput prints tool output in a muted block. Long output is summarized as:
-// first 2 lines + "... +N lines" + last 2 lines.
 func ToolOutput(output string) {
-	if output == "" {
-		return
-	}
-
-	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
-	if len(lines) == 0 {
-		return
-	}
-
-	const headLines = 2
-	const tailLines = 2
-
-	var display []string
-	if len(lines) <= headLines+tailLines+1 {
-		display = lines
-	} else {
-		display = append(display, lines[:headLines]...)
-		display = append(display, fmt.Sprintf("... +%d lines", len(lines)-headLines-tailLines))
-		display = append(display, lines[len(lines)-tailLines:]...)
-	}
-
-	indent := "  "
-	for i, line := range display {
-		color := ColorMuted
-		if i == headLines && len(lines) > headLines+tailLines+1 && strings.HasPrefix(line, "... +") {
-			fmt.Printf("%s%s%c %s%s\n", indent, color, '⎿', line, Reset)
-			continue
-		}
-		if i == 0 {
-			fmt.Printf("%s%s%c %s%s\n", indent, color, '⎿', line, Reset)
-			continue
-		}
-		fmt.Printf("%s%s  %s%s\n", indent, color, line, Reset)
+	for _, line := range defaultRenderer.renderToolOutput(output) {
+		fmt.Println(line)
 	}
 }
 
-// wrapText wraps text to fit within maxWidth
+func Blank() {
+	fmt.Println()
+}
+
+func ToolCall(name, args string) {
+	width := 50
+	label := "─ " + name + " "
+	lineWidth := width - 2 - runewidth.StringWidth(label)
+	if lineWidth < 0 {
+		lineWidth = 0
+	}
+	top := ColorMuted + "┌" + label + strings.Repeat("─", lineWidth) + "┐" + Reset
+	bot := ColorMuted + "└" + strings.Repeat("─", width-2) + "┘" + Reset
+	fmt.Println(top)
+	for _, line := range wrapText(args, width-4) {
+		fmt.Printf("%s %s%s%s\n", ColorMuted+BorderVertical+Reset, ColorDefault, padRight(line, width-4), ColorMuted+BorderVertical+Reset)
+	}
+	fmt.Println(bot)
+}
+
 func wrapText(text string, maxWidth int) []string {
 	if text == "" {
 		return []string{""}
@@ -175,12 +150,4 @@ func wrapText(text string, maxWidth int) []string {
 		lines = append(lines, currentLine.String())
 	}
 	return lines
-}
-
-func padRight(text string, width int) string {
-	padding := width - runewidth.StringWidth(text)
-	if padding <= 0 {
-		return text
-	}
-	return text + strings.Repeat(" ", padding)
 }

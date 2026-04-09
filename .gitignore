@@ -35,4 +35,5 @@ claudego
 demo
 .DS_Store
 .omc
-
+.omx
+*/**/tmp/

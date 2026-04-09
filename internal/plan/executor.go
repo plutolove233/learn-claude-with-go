@@ -77,7 +77,7 @@ func (e *Executor) RunWithPlan(ctx context.Context, goal string) (*Plan, error) 
 
 	// Create the plan using the LLM
 	ui.Info("Analyzing task and creating plan...")
-	fmt.Println()
+	ui.Blank()
 	plan, err := e.planner.CreatePlan(ctx, PlanningRequest{Goal: goal, PWD: pwd})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create plan: %w", err)
@@ -98,7 +98,7 @@ func (e *Executor) RunWithPlan(ctx context.Context, goal string) (*Plan, error) 
 	}
 
 	ui.Info("Starting execution...")
-	fmt.Println()
+	ui.Blank()
 	if err := e.executePlan(ctx, plan); err != nil {
 		plan.Status = PlanStatusFailed
 		plan.Save()
@@ -130,7 +130,7 @@ func (e *Executor) ResumePlan(ctx context.Context, plan *Plan) error {
 	}
 
 	ui.Info("Resuming execution...")
-	fmt.Println()
+	ui.Blank()
 	if err := e.executePlan(ctx, plan); err != nil {
 		plan.Status = PlanStatusPaused
 		if saveErr := plan.Save(); saveErr != nil {
@@ -163,9 +163,9 @@ func (e *Executor) executePlan(ctx context.Context, plan *Plan) error {
 		plan.CurrentStep = i
 		plan.Save()
 
-		fmt.Println()
+		ui.Blank()
 		ui.Step(i+1, len(plan.Steps), step.Task)
-		fmt.Println()
+		ui.Blank()
 
 		// Mark step as started
 		now := time.Now()
@@ -197,7 +197,7 @@ func (e *Executor) executePlan(ctx context.Context, plan *Plan) error {
 		plan.Save()
 
 		ui.Success("Step completed")
-		fmt.Println()
+		ui.Blank()
 	}
 	return nil
 }
@@ -223,6 +223,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 	defer stream.Close()
 
 	var fullContent strings.Builder
+	assistantStream := ui.NewAssistantStreamer()
 	var toolCallOrder []int
 	type partialToolCall struct {
 		id        string
@@ -241,7 +242,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 		delta := event.Choices[0].Delta
 
 		if delta.Content != "" {
-			fullContent.WriteString(delta.Content)
+			fullContent.WriteString(assistantStream.Write(delta.Content))
 		}
 
 		for _, tc := range delta.ToolCalls {
@@ -267,6 +268,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 	if stream.Err() != nil {
 		return "", fmt.Errorf("LLM call failed: %w", stream.Err())
 	}
+	fullContent.WriteString(assistantStream.Finish())
 
 	// Build tool calls
 	var toolCalls []openai.ChatCompletionMessageToolCallUnion
@@ -284,7 +286,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 
 	// If there are tool calls, execute them
 	if len(toolCalls) > 0 {
-		fmt.Println()
+		ui.Blank()
 		results, err := e.executeTools(ctx, toolCalls)
 		if err != nil {
 			return "", fmt.Errorf("tool execution failed: %w", err)
@@ -309,18 +311,20 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 		defer stream2.Close()
 
 		fullContent.Reset()
+		assistantStream = ui.NewAssistantStreamer()
 		for stream2.Next() {
 			event := stream2.Current()
 			if len(event.Choices) == 0 {
 				continue
 			}
 			if delta := event.Choices[0].Delta.Content; delta != "" {
-				fullContent.WriteString(delta)
+				fullContent.WriteString(assistantStream.Write(delta))
 			}
 		}
 		if stream2.Err() != nil {
 			return "", fmt.Errorf("LLM call failed: %w", stream2.Err())
 		}
+		fullContent.WriteString(assistantStream.Finish())
 	}
 
 	return fullContent.String(), nil
@@ -336,8 +340,8 @@ func (e *Executor) executeTools(ctx context.Context, toolCalls []openai.ChatComp
 			continue
 		}
 
-		ui.Info(fmt.Sprintf("$ Execute %s(%s)", fn.Name, fn.Arguments))
-		fmt.Println()
+		ui.ToolCall(fn.Name, fn.Arguments)
+		ui.Blank()
 
 		input := []byte(fn.Arguments)
 		var output string

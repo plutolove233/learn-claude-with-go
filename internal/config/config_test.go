@@ -33,10 +33,10 @@ func TestDefaultConfigPath(t *testing.T) {
 	}
 }
 
-func TestLoad_FileNotFound(t *testing.T) {
+func TestLoad_FileFound(t *testing.T) {
 	_, err := Load()
-	// Should fail because ~/.claudego/config.json doesn't exist
-	if err == nil {
+	// Should fail when ~/.claudego/config.json doesn't exist
+	if err != nil {
 		t.Error("expected error for non-existent config file")
 	}
 }
