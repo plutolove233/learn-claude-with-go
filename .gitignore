@@ -37,3 +37,4 @@ demo
 .omc
 .omx
 */**/tmp/
+dist/

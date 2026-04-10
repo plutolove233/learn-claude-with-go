@@ -1,0 +1,97 @@
+# .github/workflows/release.yml
+# 触发方式：
+#   1. 手动在 Actions 页面触发，选择 bump 类型
+#   2. 推送 v* tag 自动发布（适合从外部打 tag 的工作流）
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "版本升级类型"
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
+
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # 允许推送 tag 和创建 Release
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # 需要完整历史才能拿到 git log
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod  # 从 go.mod 读取版本
+          cache: true
+
+      # ── 手动触发：升版本号、打 tag、推送 ──────────────────
+      - name: Bump version & tag (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          chmod +x scripts/build.sh
+          ./scripts/build.sh --bump ${{ inputs.bump }}
+
+          NEW_VERSION="v$(cat VERSION)"
+          git add VERSION
+          git commit -m "chore: bump version to ${NEW_VERSION}"
+          git tag "${NEW_VERSION}"
+          git push origin HEAD:main --tags
+
+          echo "RELEASE_VERSION=${NEW_VERSION}" >> $GITHUB_ENV
+
+      # ── tag 推送触发：直接从 tag 读版本 ────────────────────
+      - name: Read version from tag (push tag only)
+        if: github.event_name == 'push'
+        run: |
+          echo "RELEASE_VERSION=${GITHUB_REF_NAME}" >> $GITHUB_ENV
+          # 同步 VERSION 文件（去掉 v 前缀）
+          echo "${GITHUB_REF_NAME#v}" > VERSION
+
+      # ── 跨平台编译 ─────────────────────────────────────────
+      - name: Build all platforms
+        run: |
+          chmod +x scripts/build.sh
+          VERSION=$(cat VERSION) ./scripts/build.sh
+
+      # ── 生成 changelog（当前 tag 与上一个 tag 之间的 commits）
+      - name: Generate changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [[ -n "$PREV_TAG" ]]; then
+            git log "${PREV_TAG}..HEAD" --pretty="- %s (%h)" > CHANGELOG_FRAGMENT.md
+          else
+            git log --pretty="- %s (%h)" > CHANGELOG_FRAGMENT.md
+          fi
+          echo "--- Changelog ---"
+          cat CHANGELOG_FRAGMENT.md
+
+      # ── 发布到 GitHub Releases ─────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_VERSION }}
+          name: "ClaudeGo ${{ env.RELEASE_VERSION }}"
+          body_path: CHANGELOG_FRAGMENT.md
+          files: |
+            dist/*
+          draft: false
+          prerelease: false
