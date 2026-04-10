@@ -2,6 +2,7 @@ package tests
 
 import (
 	"claudego/internal/tools"
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -20,8 +21,9 @@ func TestBashTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to marshal input: %v", err)
 	}
+	ctx := context.Background()
 
-	_, err = tool.Execute(inputBytes)
+	_, err = tool.Execute(ctx, inputBytes)
 	if err == nil {
 		t.Fatal("expected dangerous command to be rejected")
 	}

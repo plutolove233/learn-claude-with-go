@@ -4,69 +4,30 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
-
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
-	"github.com/openai/openai-go/v3/shared"
-	"github.com/openai/openai-go/v3/shared/constant"
 
 	"claudego/internal/config"
 	"claudego/internal/loop"
 	"claudego/internal/tools"
+	"claudego/pkg/llm"
 	"claudego/pkg/logger"
 	"claudego/pkg/ui"
 )
 
 type Executor struct {
-	planner  *Planner
-	registry interface {
-		EnabledTools() []interface {
-			Name() string
-			Description() string
-			Execute(input []byte) (string, error)
-			Parameters() map[string]any
-		}
-	}
-	client openai.Client
-	model  string
-	logger *logger.Logger
+	planner   *Planner
+	registry  *tools.Registry
+	llmClient *llm.Client
+	logger    *logger.Logger
 }
 
 func NewExecutor(cfg *config.Config, log *logger.Logger, registry *tools.Registry) *Executor {
-	planner := NewPlanner(cfg)
-	registryAdapter := &registryAdapter{registry}
 	return &Executor{
-		planner:  planner,
-		registry: registryAdapter,
-		client:   openai.NewClient(option.WithAPIKey(cfg.APIKey), option.WithBaseURL(cfg.BaseURL)),
-		model:    cfg.Model,
-		logger:   log,
+		planner:   NewPlanner(cfg),
+		registry:  registry,
+		llmClient: llm.NewClient(cfg),
+		logger:    log,
 	}
-}
-
-type registryAdapter struct {
-	r *tools.Registry
-}
-
-func (a *registryAdapter) EnabledTools() []interface {
-	Name() string
-	Description() string
-	Execute(input []byte) (string, error)
-	Parameters() map[string]any
-} {
-	tools := a.r.EnabledTools()
-	result := make([]interface {
-		Name() string
-		Description() string
-		Execute(input []byte) (string, error)
-		Parameters() map[string]any
-	}, len(tools))
-	for i, t := range tools {
-		result[i] = t
-	}
-	return result
 }
 
 func (e *Executor) RunWithPlan(ctx context.Context, goal string) (*Plan, error) {
@@ -214,231 +175,36 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 		{Role: "user", Content: step.Task},
 	}
 
-	// Use the same streaming approach as the main agent
-	stream := e.client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
-		Messages: e.buildMessages(messages, systemPrompt),
-		Model:    shared.ChatModel(e.model),
-		Tools:    e.buildToolDefs(),
-	})
-	defer stream.Close()
-
-	var fullContent strings.Builder
-	assistantStream := ui.NewAssistantStreamer()
-	var toolCallOrder []int
-	type partialToolCall struct {
-		id        string
-		toolType  string
-		name      string
-		arguments strings.Builder
-	}
-	toolCallsByIdx := map[int]*partialToolCall{}
-
-	for stream.Next() {
-		event := stream.Current()
-		if len(event.Choices) == 0 {
-			continue
-		}
-
-		delta := event.Choices[0].Delta
-
-		if delta.Content != "" {
-			fullContent.WriteString(assistantStream.Write(delta.Content))
-		}
-
-		for _, tc := range delta.ToolCalls {
-			idx := int(tc.Index)
-			if _, exists := toolCallsByIdx[idx]; !exists {
-				toolCallsByIdx[idx] = &partialToolCall{}
-				toolCallOrder = append(toolCallOrder, idx)
-			}
-			p := toolCallsByIdx[idx]
-			if tc.ID != "" {
-				p.id = tc.ID
-			}
-			if tc.Type != "" {
-				p.toolType = string(tc.Type)
-			}
-			if tc.Function.Name != "" {
-				p.name = tc.Function.Name
-			}
-			p.arguments.WriteString(tc.Function.Arguments)
-		}
+	// Use llm.Client for streaming
+	result, err := e.llmClient.Stream(ctx, messages, systemPrompt, e.registry)
+	if err != nil {
+		return "", fmt.Errorf("LLM call failed: %w", err)
 	}
 
-	if stream.Err() != nil {
-		return "", fmt.Errorf("LLM call failed: %w", stream.Err())
-	}
-	fullContent.WriteString(assistantStream.Finish())
-
-	// Build tool calls
-	var toolCalls []openai.ChatCompletionMessageToolCallUnion
-	for _, idx := range toolCallOrder {
-		p := toolCallsByIdx[idx]
-		toolCalls = append(toolCalls, openai.ChatCompletionMessageToolCallUnion{
-			ID:   p.id,
-			Type: p.toolType,
-			Function: openai.ChatCompletionMessageFunctionToolCallFunction{
-				Name:      p.name,
-				Arguments: p.arguments.String(),
-			},
-		})
-	}
-
-	// If there are tool calls, execute them
-	if len(toolCalls) > 0 {
+	// If there are tool calls, execute them and continue conversation
+	if len(result.ToolCalls) > 0 {
 		ui.Blank()
-		results, err := e.executeTools(ctx, toolCalls)
-		if err != nil {
-			return "", fmt.Errorf("tool execution failed: %w", err)
-		}
+		toolResults := e.llmClient.ExecuteTools(ctx, result.ToolCalls, e.registry)
 
 		// Append assistant message with tool calls
 		messages = append(messages, loop.Message{
 			Role:      "assistant",
-			Content:   fullContent.String(),
-			ToolCalls: toolCalls,
+			Content:   result.Content,
+			ToolCalls: result.ToolCalls,
 		})
 
 		// Append tool results
-		messages = append(messages, loop.Message{Role: "user", Content: results})
+		messages = append(messages, loop.Message{Role: "user", Content: toolResults})
 
 		// Continue the conversation to get final response
-		stream2 := e.client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
-			Messages: e.buildMessages(messages, systemPrompt),
-			Model:    shared.ChatModel(e.model),
-			Tools:    e.buildToolDefs(),
-		})
-		defer stream2.Close()
-
-		fullContent.Reset()
-		assistantStream = ui.NewAssistantStreamer()
-		for stream2.Next() {
-			event := stream2.Current()
-			if len(event.Choices) == 0 {
-				continue
-			}
-			if delta := event.Choices[0].Delta.Content; delta != "" {
-				fullContent.WriteString(assistantStream.Write(delta))
-			}
+		result2, err := e.llmClient.Stream(ctx, messages, systemPrompt, e.registry)
+		if err != nil {
+			return "", fmt.Errorf("LLM call failed: %w", err)
 		}
-		if stream2.Err() != nil {
-			return "", fmt.Errorf("LLM call failed: %w", stream2.Err())
-		}
-		fullContent.WriteString(assistantStream.Finish())
+		return result2.Content, nil
 	}
 
-	return fullContent.String(), nil
-}
-
-func (e *Executor) executeTools(ctx context.Context, toolCalls []openai.ChatCompletionMessageToolCallUnion) ([]loop.ToolCallResult, error) {
-	var results []loop.ToolCallResult
-	enabledTools := e.registry.EnabledTools()
-
-	for _, tc := range toolCalls {
-		fn := tc.Function
-		if fn.Name == "" {
-			continue
-		}
-
-		ui.ToolCall(fn.Name, fn.Arguments)
-		ui.Blank()
-
-		input := []byte(fn.Arguments)
-		var output string
-		var toolFound bool
-
-		for _, t := range enabledTools {
-			if t.Name() == fn.Name {
-				toolFound = true
-				out, execErr := t.Execute(input)
-				if execErr != nil {
-					output = "Error: " + execErr.Error()
-				} else {
-					output = out
-				}
-				break
-			}
-		}
-
-		if !toolFound {
-			output = fmt.Sprintf("Error: tool %q not found or not enabled", fn.Name)
-		}
-
-		ui.ToolOutput(output)
-
-		results = append(results, loop.ToolCallResult{
-			Name:       fn.Name,
-			ToolCallID: tc.ID,
-			Content:    output,
-		})
-	}
-	return results, nil
-}
-
-func (e *Executor) buildMessages(messages []loop.Message, system string) []openai.ChatCompletionMessageParamUnion {
-	openaiMsgs := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
-	openaiMsgs = append(openaiMsgs, openai.SystemMessage(system))
-
-	for _, m := range messages {
-		switch m.Role {
-		case "user":
-			if content, ok := m.Content.(string); ok {
-				openaiMsgs = append(openaiMsgs, openai.UserMessage(content))
-			} else if results, ok := m.Content.([]loop.ToolCallResult); ok {
-				for _, r := range results {
-					openaiMsgs = append(openaiMsgs, openai.ToolMessage(r.Content, r.ToolCallID))
-				}
-			}
-		case "assistant":
-			if content, ok := m.Content.(string); ok {
-				if len(m.ToolCalls) > 0 {
-					openaiMsgs = append(openaiMsgs, openai.ChatCompletionMessageParamUnion{
-						OfAssistant: &openai.ChatCompletionAssistantMessageParam{
-							Content:   openai.ChatCompletionAssistantMessageParamContentUnion{OfString: openai.String(content)},
-							ToolCalls: toToolCallParams(m.ToolCalls),
-						},
-					})
-				} else {
-					openaiMsgs = append(openaiMsgs, openai.AssistantMessage(content))
-				}
-			}
-		}
-	}
-	return openaiMsgs
-}
-
-func toToolCallParams(tcs []openai.ChatCompletionMessageToolCallUnion) []openai.ChatCompletionMessageToolCallUnionParam {
-	params := make([]openai.ChatCompletionMessageToolCallUnionParam, len(tcs))
-	for i, tc := range tcs {
-		params[i] = openai.ChatCompletionMessageToolCallUnionParam{
-			OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
-				ID: tc.ID,
-				Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
-					Name:      tc.Function.Name,
-					Arguments: tc.Function.Arguments,
-				},
-				Type: constant.Function(tc.Type),
-			},
-		}
-	}
-	return params
-}
-
-func (e *Executor) buildToolDefs() []openai.ChatCompletionToolUnionParam {
-	tools := e.registry.EnabledTools()
-	if len(tools) == 0 {
-		return nil
-	}
-
-	toolDefs := make([]openai.ChatCompletionToolUnionParam, len(tools))
-	for i, t := range tools {
-		toolDefs[i] = openai.ChatCompletionFunctionTool(openai.FunctionDefinitionParam{
-			Name:        t.Name(),
-			Description: openai.String(t.Description()),
-			Parameters:  t.Parameters(),
-		})
-	}
-	return toolDefs
+	return result.Content, nil
 }
 
 func (e *Executor) DisplayPlan(plan *Plan) {

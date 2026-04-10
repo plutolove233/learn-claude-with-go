@@ -2,6 +2,7 @@ package tools
 
 import (
 	"claudego/utils"
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -37,7 +38,7 @@ func (t *BaseTool[T]) Metadata() ToolMetadata     { return t.metadata }
 func (t *BaseTool[T]) Parameters() map[string]any { return t.parameters }
 
 // Execute runs the fixed pipeline: parse → validate → business logic.
-func (t *BaseTool[T]) Execute(input []byte) (string, error) {
+func (t *BaseTool[T]) Execute(ctx context.Context, input []byte) (string, error) {
 	var p T
 	if err := json.Unmarshal(input, &p); err != nil {
 		return "", fmt.Errorf("parse input into %T: %w", p, err)
@@ -55,6 +56,10 @@ func (t *BaseTool[T]) Execute(input []byte) (string, error) {
 			return "", err
 		}
 	}
-
-	return t.fn(p)
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	default:
+		return t.fn(p)
+	}
 }

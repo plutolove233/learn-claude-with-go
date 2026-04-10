@@ -1,5 +1,7 @@
 package tools
 
+import "context"
+
 // ToolCategory classifies tools for organization and filtering
 type ToolCategory string
 
@@ -22,7 +24,7 @@ type ToolMetadata struct {
 type Tool interface {
 	Name() string
 	Description() string
-	Execute(input []byte) (string, error)
+	Execute(ctx context.Context, input []byte) (string, error)
 	Parameters() map[string]any
 	Metadata() ToolMetadata
 }

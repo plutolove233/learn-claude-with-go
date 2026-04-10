@@ -8,15 +8,16 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/peterh/liner"
-
 	"claudego/internal/config"
 	"claudego/internal/loop"
 	"claudego/internal/plan"
 	"claudego/internal/tools"
+	"claudego/pkg/conversation"
 	"claudego/pkg/logger"
 	"claudego/pkg/ui"
 	"claudego/utils"
+
+	"github.com/peterh/liner"
 )
 
 func main() {
@@ -29,43 +30,25 @@ func main() {
 	}
 
 	log := logger.GetLogger()
-
-	// Register default tools and get the registry
 	tools.RegisterDefaults()
 	registry := tools.GetRegistry()
 
-	// Optionally enable/disable tools by category
-	// registry.DisableByCategory(tools.CategoryNetwork)
-
+	conv := conversation.New()
 	agent := loop.New(cfg, log, registry)
 	executor := plan.NewExecutor(cfg, log, registry)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		for {
-			select {
-			case <-sigCh:
-				cancel()
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 
 	cwd, _ := os.Getwd()
 	cwd, _ = utils.AbsToTilde(cwd)
 	ui.Welcome("ClaudeGo Agent", "v1.0", cfg.Model, cwd)
+
+	rootCtx := context.Background()
 
 	line := liner.NewLiner()
 	defer line.Close()
 	line.SetCtrlCAborts(true)
 
 	for {
-		query, err := line.Prompt("s01 >> ")
+		query, err := line.Prompt(">_ ")
 		if err != nil {
 			if err == liner.ErrPromptAborted {
 				continue
@@ -80,34 +63,67 @@ func main() {
 
 		line.AppendHistory(query)
 
-		// Handle plan commands
+		ctx, cancel := context.WithCancel(rootCtx)
+
+		// 启动 ESC / Ctrl+C 中断监听，仅在模型调用期间生效
+		stopListener := startInterruptListener(cancel)
+
 		if strings.HasPrefix(query, "/plan") {
 			handlePlanCommand(ctx, executor, query)
-			fmt.Println()
-			continue
-		}
-
-		// Auto-plan mode: check if this is a complex task that needs planning
-		if isComplexTask(query) {
+		} else if isComplexTask(query) {
 			ui.Info("Detected complex task - entering plan mode...")
 			if _, err := executor.RunWithPlan(ctx, query); err != nil {
-				log.Warning("Plan execution failed: %v", err)
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				if ctx.Err() != nil {
+					ui.Warning("Interrupted. Rolling back conversation.")
+				} else {
+					log.Warning("Plan execution failed: %v", err)
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				}
 			}
 		} else {
-			// Regular single-turn mode
-			messages := []loop.Message{
-				{Role: "user", Content: query},
-			}
+			conv.AddUserMessage(query)
+			checkpoint := conv.Checkpoint()
+			messages := conv.GetMessages()
 
 			if err := agent.Run(ctx, messages); err != nil {
-				log.Warning("Agent run failed: %v", err)
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				if ctx.Err() != nil {
+					ui.Warning("Generation interrupted. Rolling back conversation.")
+					conv.Rollback(checkpoint)
+				} else {
+					log.Warning("Agent run failed: %v", err)
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				}
 			}
 		}
+
+		stopListener() // 停止监听，恢复终端状态
+		cancel()
 		fmt.Println()
 	}
 }
+
+// startInterruptListener 在模型调用期间监听Ctrl+C，
+// 触发都会调用 cancel() 中断 context。
+// 返回的 stop 函数必须在模型调用结束后调用，以恢复终端状态。
+func startInterruptListener(cancel context.CancelFunc) (stop func()) {
+	done := make(chan struct{})
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT)
+
+	go func() {
+		defer signal.Stop(sigCh)
+		select {
+		case <-sigCh:
+			cancel()
+		case <-done:
+		}
+	}()
+
+	return func() { close(done) }
+}
+
+// -------- 以下函数无改动 --------
 
 func handlePlanCommand(ctx context.Context, executor *plan.Executor, cmd string) {
 	args := strings.Fields(cmd)
@@ -172,7 +188,6 @@ func printPlanHelp() {
 }
 
 func isComplexTask(query string) bool {
-	// Keywords that indicate complex multi-step tasks
 	complexKeywords := []string{
 		"refactor", "重构", "migrate", "迁移", "implement", "实现",
 		"build", "创建", "develop", "开发", "setup", "设置",
@@ -188,10 +203,5 @@ func isComplexTask(query string) bool {
 		}
 	}
 
-	// Tasks with multiple items separated by "and" or "、"
-	if strings.Contains(query, " and ") || strings.Contains(query, "、") {
-		return true
-	}
-
-	return false
+	return strings.Contains(query, " and ") || strings.Contains(query, "、")
 }
