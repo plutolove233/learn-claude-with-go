@@ -28,6 +28,11 @@ func New(cfg *config.Config, l *logger.Logger, r interfaces.ToolRegistry) *Agent
 	}
 }
 
+// LLMClient returns the LLM client for skill execution.
+func (a *Agent) LLMClient() *llm.Client {
+	return a.llmClient
+}
+
 func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 	pwd, err := os.Getwd()
 	if err != nil {

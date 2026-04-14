@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -14,6 +15,7 @@ import (
 	"claudego/internal/tools"
 	"claudego/pkg/conversation"
 	"claudego/pkg/logger"
+	"claudego/pkg/skill"
 	"claudego/pkg/ui"
 	"claudego/utils"
 
@@ -33,6 +35,15 @@ func main() {
 	tools.RegisterDefaults()
 	registry := tools.GetRegistry()
 
+	// Load skills from ~/.claudego/skills/
+	skillRegistry := skill.NewRegistry()
+	home, _ := os.UserHomeDir()
+	skillsDir := filepath.Join(home, ".claudego", "skills")
+	if err := skillRegistry.LoadFromDir(skillsDir); err != nil {
+		// Skills are optional - log warning but don't fail startup
+		log.Warning("Failed to load skills: %v", err)
+	}
+
 	conv := conversation.New()
 	agent := loop.New(cfg, log, registry)
 	executor := plan.NewExecutor(cfg, log, registry)
@@ -46,6 +57,14 @@ func main() {
 	line := liner.NewLiner()
 	defer line.Close()
 	line.SetCtrlCAborts(true)
+
+	// Configure skill auto-completion for liner
+	line.SetCompleter(func(line string) []string {
+		if len(line) > 0 && line[0] == '/' {
+			return skillRegistry.Completions(line[1:])
+		}
+		return nil
+	})
 
 	for {
 		query, err := line.Prompt(">_ ")
@@ -65,8 +84,19 @@ func main() {
 
 		ctx, cancel := context.WithCancel(rootCtx)
 
-		// 启动 ESC / Ctrl+C 中断监听，仅在模型调用期间生效
+		// 启动 Ctrl+C 中断监听，仅在模型调用期间生效
 		stopListener := startInterruptListener(cancel)
+
+		// Check for skill slash commands
+		if matched, err := skill.MatchAndExecute(ctx, query, skillRegistry, agent.LLMClient(), registry); matched {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Skill error: %v\n", err)
+			}
+			stopListener()
+			cancel()
+			fmt.Println()
+			continue
+		}
 
 		if strings.HasPrefix(query, "/plan") {
 			handlePlanCommand(ctx, executor, query)
@@ -191,7 +221,7 @@ func isComplexTask(query string) bool {
 	complexKeywords := []string{
 		"refactor", "重构", "migrate", "迁移", "implement", "实现",
 		"build", "创建", "develop", "开发", "setup", "设置",
-		"convert", "转换", "upgrade", "升级", "audit", "review",
+		"convert", "转换", "upgrade", "升级", "audit",
 		"analyze", "分析", "design", "设计", "architecture",
 		"系统", "项目", "multiple", "several", "many",
 	}
