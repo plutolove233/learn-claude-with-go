@@ -77,6 +77,9 @@ When plan mode activates:
 4. Press `Ctrl+C` to interrupt — conversation rolls back to the last checkpoint
 5. Resume a paused plan with the saved plan ID
 
+![plan1](./assets/plan-mode.png)
+![plan2](./assets/plan-mode-2.png)
+
 ### Built-in Tools
 
 **bash** — Execute shell commands
