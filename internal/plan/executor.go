@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"claudego/internal/config"
-	"claudego/internal/tools"
+	"claudego/pkg/interfaces"
 	"claudego/pkg/llm"
 	"claudego/pkg/logger"
 	"claudego/pkg/types"
@@ -16,12 +16,12 @@ import (
 
 type Executor struct {
 	planner   *Planner
-	registry  *tools.Registry
+	registry  interfaces.ToolRegistry
 	llmClient *llm.Client
 	logger    *logger.Logger
 }
 
-func NewExecutor(cfg *config.Config, log *logger.Logger, registry *tools.Registry) *Executor {
+func NewExecutor(cfg *config.Config, log *logger.Logger, registry interfaces.ToolRegistry) *Executor {
 	return &Executor{
 		planner:   NewPlanner(cfg),
 		registry:  registry,
@@ -176,7 +176,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 	}
 
 	// Use llm.Client for streaming
-	result, err := e.llmClient.Stream(ctx, messages, systemPrompt, e.registry)
+	result, err := e.llmClient.Complete(ctx, messages, systemPrompt, e.registry)
 	if err != nil {
 		return "", fmt.Errorf("LLM call failed: %w", err)
 	}
@@ -197,7 +197,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 		messages = append(messages, types.Message{Role: "user", Content: toolResults})
 
 		// Continue the conversation to get final response
-		result2, err := e.llmClient.Stream(ctx, messages, systemPrompt, e.registry)
+		result2, err := e.llmClient.Complete(ctx, messages, systemPrompt, e.registry)
 		if err != nil {
 			return "", fmt.Errorf("LLM call failed: %w", err)
 		}

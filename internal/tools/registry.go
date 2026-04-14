@@ -3,29 +3,39 @@ package tools
 import (
 	"fmt"
 	"sync"
+
+	"claudego/pkg/interfaces"
+	"claudego/pkg/types"
 )
 
 // Registry holds all registered tools and their enabled state
 type Registry struct {
 	mu      sync.RWMutex
-	tools   map[string]Tool   // tool name -> Tool
-	enabled map[string]bool   // tool name -> enabled (default true)
+	tools   map[string]interfaces.Tool // tool name -> Tool
+	enabled map[string]bool            // tool name -> enabled (default true)
 }
 
 // Global default registry
 var defaultRegistry = &Registry{
-	tools:   make(map[string]Tool),
+	tools:   make(map[string]interfaces.Tool),
 	enabled: make(map[string]bool),
 }
 
+func NewRegistry() interfaces.ToolRegistry {
+	return &Registry{
+		tools:   make(map[string]interfaces.Tool),
+		enabled: make(map[string]bool),
+	}
+}
+
 // GetRegistry returns the global tool registry
-func GetRegistry() *Registry {
+func GetRegistry() interfaces.ToolRegistry {
 	return defaultRegistry
 }
 
 // Register adds a tool to the registry by its Name()
 // Panics if a tool with the same name is already registered
-func (r *Registry) Register(t Tool) error {
+func (r *Registry) Register(t interfaces.Tool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -50,17 +60,18 @@ func (r *Registry) Unregister(name string) {
 }
 
 // Get returns a tool by name, or nil if not found
-func (r *Registry) Get(name string) Tool {
+func (r *Registry) Get(name string) (interfaces.Tool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.tools[name]
+	t, ok := r.tools[name]
+	return t, ok
 }
 
 // List returns all registered tools
-func (r *Registry) List() []Tool {
+func (r *Registry) List() []interfaces.Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	tools := make([]Tool, 0, len(r.tools))
+	tools := make([]interfaces.Tool, 0, len(r.tools))
 	for _, t := range r.tools {
 		tools = append(tools, t)
 	}
@@ -68,10 +79,10 @@ func (r *Registry) List() []Tool {
 }
 
 // ListByCategory returns tools filtered by category
-func (r *Registry) ListByCategory(category ToolCategory) []Tool {
+func (r *Registry) ListByCategory(category types.ToolCategory) []interfaces.Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	tools := make([]Tool, 0, len(r.tools))
+	tools := make([]interfaces.Tool, 0, len(r.tools))
 	for _, t := range r.tools {
 		if t.Metadata().Category == category {
 			tools = append(tools, t)
@@ -102,7 +113,7 @@ func (r *Registry) Count() int {
 func (r *Registry) Clear() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.tools = make(map[string]Tool)
+	r.tools = make(map[string]interfaces.Tool)
 	r.enabled = make(map[string]bool)
 }
 
@@ -159,10 +170,10 @@ func (r *Registry) DisableAll() {
 }
 
 // EnabledTools returns the list of currently enabled tools
-func (r *Registry) EnabledTools() []Tool {
+func (r *Registry) EnabledTools() []interfaces.Tool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	enabled := make([]Tool, 0, len(r.tools))
+	enabled := make([]interfaces.Tool, 0, len(r.tools))
 	for _, t := range r.tools {
 		if r.enabled[t.Name()] {
 			enabled = append(enabled, t)
@@ -172,7 +183,7 @@ func (r *Registry) EnabledTools() []Tool {
 }
 
 // EnableByCategory enables all tools in a given category
-func (r *Registry) EnableByCategory(category ToolCategory) {
+func (r *Registry) EnableByCategory(category types.ToolCategory) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, t := range r.tools {
@@ -183,7 +194,7 @@ func (r *Registry) EnableByCategory(category ToolCategory) {
 }
 
 // DisableByCategory disables all tools in a given category
-func (r *Registry) DisableByCategory(category ToolCategory) {
+func (r *Registry) DisableByCategory(category types.ToolCategory) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, t := range r.tools {
@@ -191,6 +202,24 @@ func (r *Registry) DisableByCategory(category ToolCategory) {
 			r.enabled[t.Name()] = false
 		}
 	}
+}
+
+// // Filter returns a registry exposing only the whitelisted tool names.
+func (r *Registry) Filter(allowedTools []string) interfaces.ToolRegistry {
+	register := NewRegistry()
+	for _, name := range allowedTools {
+		if t, ok := r.Get(name); ok {
+			register.Register(t)
+		}
+	}
+	if _, ok := register.Get("task"); ok {
+		// Prevent recursive sub-agents by removing "task" from the filtered registry if it was included in the whitelist
+		if t, ok := r.Get("task"); ok {
+			register.Unregister(t.Name())
+		}
+	}
+
+	return register
 }
 
 // RegisterDefaults registers the built-in tools (bash, file_handler)

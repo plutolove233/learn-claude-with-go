@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"claudego/pkg/types"
 	"context"
 	"errors"
 	"os/exec"
@@ -32,8 +33,8 @@ func NewBashTool() *BashTool {
 				},
 				"required": []string{"command"},
 			},
-			metadata: ToolMetadata{
-				Category:   CategoryProcess,
+			metadata: types.ToolMetadata{
+				Category:   types.CategoryProcess,
 				SafeToSkip: false,
 				MaxRetries: 0,
 			},

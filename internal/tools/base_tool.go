@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"claudego/pkg/types"
 	"claudego/utils"
 	"context"
 	"encoding/json"
@@ -27,14 +28,14 @@ type BaseTool[T any] struct {
 	name          string
 	description   string
 	parameters    map[string]any
-	metadata      ToolMetadata
+	metadata      types.ToolMetadata
 	fn            func(T) (string, error)
 	extraValidate func(T) error
 }
 
 func (t *BaseTool[T]) Name() string               { return t.name }
 func (t *BaseTool[T]) Description() string        { return t.description }
-func (t *BaseTool[T]) Metadata() ToolMetadata     { return t.metadata }
+func (t *BaseTool[T]) Metadata() types.ToolMetadata     { return t.metadata }
 func (t *BaseTool[T]) Parameters() map[string]any { return t.parameters }
 
 // Execute runs the fixed pipeline: parse → validate → business logic.

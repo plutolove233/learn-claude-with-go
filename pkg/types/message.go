@@ -17,3 +17,10 @@ type ToolCallResult struct {
 	Name       string `json:"name"`
 	Content    string `json:"content"`
 }
+
+// CompleteResult represents the result of an LLM completion, including content, tool calls, and finish reason.
+type CompleteResult struct {
+	Content      string
+	ToolCalls    []openai.ChatCompletionMessageToolCallUnion
+	FinishReason string
+}

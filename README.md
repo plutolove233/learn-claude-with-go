@@ -1,6 +1,7 @@
 # ClaudeGo
 
 A CLI-based AI coding agent written in Go, powered by LLMs via a streaming REPL interface.
+![imgs](./assets/image.png)
 
 ## Features
 

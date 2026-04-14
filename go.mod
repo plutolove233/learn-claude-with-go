@@ -7,6 +7,7 @@ require (
 	github.com/openai/openai-go/v3 v3.30.0
 	github.com/peterh/liner v1.2.2
 	github.com/sirupsen/logrus v1.9.4
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

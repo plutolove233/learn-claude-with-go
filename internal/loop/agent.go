@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"claudego/internal/config"
-	"claudego/internal/tools"
+	"claudego/pkg/interfaces"
 	"claudego/pkg/llm"
 	"claudego/pkg/logger"
 	"claudego/pkg/types"
@@ -15,11 +15,11 @@ import (
 type Agent struct {
 	cfg       *config.Config
 	logger    *logger.Logger
-	registry  *tools.Registry
+	registry  interfaces.ToolRegistry
 	llmClient *llm.Client
 }
 
-func New(cfg *config.Config, l *logger.Logger, r *tools.Registry) *Agent {
+func New(cfg *config.Config, l *logger.Logger, r interfaces.ToolRegistry) *Agent {
 	return &Agent{
 		cfg:       cfg,
 		logger:    l,
@@ -36,7 +36,7 @@ func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Use bash to solve tasks.", pwd)
 
 	for {
-		result, err := a.llmClient.Stream(ctx, messages, systemPrompt, a.registry)
+		result, err := a.llmClient.Complete(ctx, messages, systemPrompt, a.registry)
 		if err != nil {
 			return fmt.Errorf("LLM call failed: %w", err)
 		}

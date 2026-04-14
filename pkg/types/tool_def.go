@@ -1,6 +1,4 @@
-package tools
-
-import "context"
+package types
 
 // ToolCategory classifies tools for organization and filtering
 type ToolCategory string
@@ -18,13 +16,4 @@ type ToolMetadata struct {
 	Category   ToolCategory
 	SafeToSkip bool // if true, agent can proceed without this tool
 	MaxRetries int  // max retry attempts on failure (0 = no retries)
-}
-
-// Tool is the core interface all tools must implement
-type Tool interface {
-	Name() string
-	Description() string
-	Execute(ctx context.Context, input []byte) (string, error)
-	Parameters() map[string]any
-	Metadata() ToolMetadata
 }

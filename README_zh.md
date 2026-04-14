@@ -1,6 +1,7 @@
 # ClaudeGo
 
 一款基于 Go 语言开发的 CLI AI 编程助手，通过流式 REPL 界面与 LLM（大语言模型）交互，完成编码任务。
+![imgs](./assets/image.png)
 
 ## 功能特性
 

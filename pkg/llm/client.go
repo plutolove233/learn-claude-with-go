@@ -12,19 +12,14 @@ import (
 	"github.com/openai/openai-go/v3/shared/constant"
 
 	"claudego/internal/config"
-	"claudego/internal/tools"
+	"claudego/pkg/interfaces"
+	"claudego/pkg/types"
 	"claudego/pkg/ui"
 )
 
 type Client struct {
 	client openai.Client
 	model  string
-}
-
-type StreamingResult struct {
-	Content      string
-	ToolCalls    []openai.ChatCompletionMessageToolCallUnion
-	FinishReason string
 }
 
 func NewClient(cfg *config.Config) *Client {
@@ -37,11 +32,15 @@ func NewClient(cfg *config.Config) *Client {
 	}
 }
 
-func (c *Client) Stream(ctx context.Context, messages []Message, system string, registry *tools.Registry) (*StreamingResult, error) {
-	toolDefs := c.BuildToolDefs(registry)
+func (c *Client) Model() string {
+	return c.model
+}
+
+func (c *Client) Complete(ctx context.Context, messages []types.Message, system string, registry interfaces.ToolRegistry) (*types.CompleteResult, error) {
+	toolDefs := c.buildToolDefs(registry)
 
 	stream := c.client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
-		Messages: c.BuildMessages(messages, system),
+		Messages: c.buildMessages(messages, system),
 		Model:    shared.ChatModel(c.model),
 		Tools:    toolDefs,
 	})
@@ -128,14 +127,14 @@ func (c *Client) Stream(ctx context.Context, messages []Message, system string, 
 		})
 	}
 
-	return &StreamingResult{
+	return &types.CompleteResult{
 		Content:      fullContent.String(),
 		ToolCalls:    toolCalls,
 		FinishReason: finishReason,
 	}, nil
 }
 
-func (c *Client) BuildMessages(messages []Message, system string) []openai.ChatCompletionMessageParamUnion {
+func (c *Client) buildMessages(messages []types.Message, system string) []openai.ChatCompletionMessageParamUnion {
 	openaiMsgs := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
 	openaiMsgs = append(openaiMsgs, openai.SystemMessage(system))
 
@@ -144,7 +143,7 @@ func (c *Client) BuildMessages(messages []Message, system string) []openai.ChatC
 		case "user":
 			if content, ok := m.Content.(string); ok {
 				openaiMsgs = append(openaiMsgs, openai.UserMessage(content))
-			} else if results, ok := m.Content.([]ToolCallResult); ok {
+			} else if results, ok := m.Content.([]types.ToolCallResult); ok {
 				for _, r := range results {
 					openaiMsgs = append(openaiMsgs, openai.ToolMessage(r.Content, r.ToolCallID))
 				}
@@ -167,7 +166,7 @@ func (c *Client) BuildMessages(messages []Message, system string) []openai.ChatC
 	return openaiMsgs
 }
 
-func (c *Client) BuildToolDefs(registry *tools.Registry) []openai.ChatCompletionToolUnionParam {
+func (c *Client) buildToolDefs(registry interfaces.ToolRegistry) []openai.ChatCompletionToolUnionParam {
 	toolDefs := registry.EnabledTools()
 	if len(toolDefs) == 0 {
 		return nil
@@ -184,8 +183,8 @@ func (c *Client) BuildToolDefs(registry *tools.Registry) []openai.ChatCompletion
 	return result
 }
 
-func (c *Client) ExecuteTools(ctx context.Context, toolCalls []openai.ChatCompletionMessageToolCallUnion, registry *tools.Registry) []ToolCallResult {
-	var results []ToolCallResult
+func (c *Client) ExecuteTools(ctx context.Context, toolCalls []openai.ChatCompletionMessageToolCallUnion, registry interfaces.ToolRegistry) []types.ToolCallResult {
+	var results []types.ToolCallResult
 	enabledTools := registry.EnabledTools()
 
 	for _, tc := range toolCalls {
@@ -218,7 +217,7 @@ func (c *Client) ExecuteTools(ctx context.Context, toolCalls []openai.ChatComple
 
 		ui.ToolOutput(output)
 
-		results = append(results, ToolCallResult{
+		results = append(results, types.ToolCallResult{
 			Name:       fn.Name,
 			ToolCallID: tc.ID,
 			Content:    output,

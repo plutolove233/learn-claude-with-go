@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"claudego/pkg/types"
 	"errors"
 	"fmt"
 	"os"
@@ -39,9 +40,9 @@ func (f *FileHandler) Description() string {
 		"Input must include 'action' (read or write), 'path', and for write action, 'content'."
 }
 
-func (f *FileHandler) Metadata() ToolMetadata {
-	return ToolMetadata{
-		Category:   CategoryFile,
+func (f *FileHandler) Metadata() types.ToolMetadata {
+	return types.ToolMetadata{
+		Category:   types.CategoryFile,
 		SafeToSkip: false,
 		MaxRetries: 0,
 	}

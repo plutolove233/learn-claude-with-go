@@ -3,17 +3,17 @@ package conversation
 import (
 	"sync"
 
-	"claudego/pkg/llm"
+	"claudego/pkg/types"
 )
 
 type Conversation struct {
 	mu       sync.Mutex
-	messages []llm.Message
+	messages []types.Message
 }
 
 func New() *Conversation {
 	return &Conversation{
-		messages: make([]llm.Message, 0),
+		messages: make([]types.Message, 0),
 	}
 }
 
@@ -41,25 +41,25 @@ func (c *Conversation) Rollback(checkpoint int) {
 func (c *Conversation) AddUserMessage(content string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.messages = append(c.messages, llm.Message{
+	c.messages = append(c.messages, types.Message{
 		Role:    "user",
 		Content: content,
 	})
 }
 
-func (c *Conversation) AddToolResults(results []llm.ToolCallResult) {
+func (c *Conversation) AddToolResults(results []types.ToolCallResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.messages = append(c.messages, llm.Message{
+	c.messages = append(c.messages, types.Message{
 		Role:    "user",
 		Content: results,
 	})
 }
 
-func (c *Conversation) GetMessages() []llm.Message {
+func (c *Conversation) GetMessages() []types.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	result := make([]llm.Message, len(c.messages))
+	result := make([]types.Message, len(c.messages))
 	copy(result, c.messages)
 	return result
 }
@@ -67,7 +67,7 @@ func (c *Conversation) GetMessages() []llm.Message {
 func (c *Conversation) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.messages = make([]llm.Message, 0)
+	c.messages = make([]types.Message, 0)
 }
 
 func (c *Conversation) MessageCount() int {
@@ -76,15 +76,15 @@ func (c *Conversation) MessageCount() int {
 	return len(c.messages)
 }
 
-func (c *Conversation) LastN(n int) []llm.Message {
+func (c *Conversation) LastN(n int) []types.Message {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if n <= 0 || n >= len(c.messages) {
-		result := make([]llm.Message, len(c.messages))
+		result := make([]types.Message, len(c.messages))
 		copy(result, c.messages)
 		return result
 	}
-	result := make([]llm.Message, n)
+	result := make([]types.Message, n)
 	copy(result, c.messages[len(c.messages)-n:])
 	return result
 }
