@@ -30,7 +30,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
-docs/superpowers/
 claudego
 demo
 .DS_Store
@@ -38,3 +37,4 @@ demo
 .omx
 */**/tmp/
 dist/
+docs/*/**
