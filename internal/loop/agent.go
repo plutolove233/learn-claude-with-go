@@ -9,11 +9,8 @@ import (
 	"claudego/internal/tools"
 	"claudego/pkg/llm"
 	"claudego/pkg/logger"
+	"claudego/pkg/types"
 )
-
-// Re-export types from llm package for backwards compatibility
-type Message = llm.Message
-type ToolCallResult = llm.ToolCallResult
 
 type Agent struct {
 	cfg       *config.Config
@@ -31,7 +28,7 @@ func New(cfg *config.Config, l *logger.Logger, r *tools.Registry) *Agent {
 	}
 }
 
-func (a *Agent) Run(ctx context.Context, messages []Message) error {
+func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
@@ -52,7 +49,7 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 
 		// Persist ToolCalls in the assistant message so BuildMessages can
 		// reconstruct a well-formed history (API requires tool_calls before tool results).
-		messages = append(messages, Message{
+		messages = append(messages, types.Message{
 			Role:      "assistant",
 			Content:   result.Content,
 			ToolCalls: result.ToolCalls,
@@ -69,7 +66,7 @@ func (a *Agent) Run(ctx context.Context, messages []Message) error {
 
 			// Pass []ToolCallResult directly so BuildMessages emits proper
 			// ToolMessage entries instead of a freeform user string.
-			messages = append(messages, Message{Role: "user", Content: results})
+			messages = append(messages, types.Message{Role: "user", Content: results})
 			continue
 		}
 		break

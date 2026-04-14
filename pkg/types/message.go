@@ -1,4 +1,4 @@
-package llm
+package types
 
 import (
 	"github.com/openai/openai-go/v3"

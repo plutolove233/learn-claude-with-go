@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"claudego/internal/config"
-	"claudego/internal/loop"
 	"claudego/internal/tools"
 	"claudego/pkg/llm"
 	"claudego/pkg/logger"
+	"claudego/pkg/types"
 	"claudego/pkg/ui"
 )
 
@@ -171,7 +171,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 
 	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Execute the following task and report results.", pwd)
 
-	messages := []loop.Message{
+	messages := []types.Message{
 		{Role: "user", Content: step.Task},
 	}
 
@@ -187,14 +187,14 @@ func (e *Executor) executeStep(ctx context.Context, step *Step) (string, error) 
 		toolResults := e.llmClient.ExecuteTools(ctx, result.ToolCalls, e.registry)
 
 		// Append assistant message with tool calls
-		messages = append(messages, loop.Message{
+		messages = append(messages, types.Message{
 			Role:      "assistant",
 			Content:   result.Content,
 			ToolCalls: result.ToolCalls,
 		})
 
 		// Append tool results
-		messages = append(messages, loop.Message{Role: "user", Content: toolResults})
+		messages = append(messages, types.Message{Role: "user", Content: toolResults})
 
 		// Continue the conversation to get final response
 		result2, err := e.llmClient.Stream(ctx, messages, systemPrompt, e.registry)
