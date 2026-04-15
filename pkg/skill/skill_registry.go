@@ -7,6 +7,11 @@ import (
 	"sync"
 )
 
+var (
+	once             sync.Once
+	registryInstance *Registry
+)
+
 // Registry holds all registered skills.
 type Registry struct {
 	mu     sync.RWMutex
@@ -16,6 +21,15 @@ type Registry struct {
 // defaultSkillRegistry is the global skill registry.
 var defaultSkillRegistry = &Registry{
 	skills: make(map[string]*types.Skill),
+}
+
+func GetSkillRegistry()  *Registry {
+	once.Do(func() {
+		registryInstance = &Registry{
+			skills: make(map[string]*types.Skill),
+		}
+	})
+	return registryInstance
 }
 
 // NewRegistry creates a new registry.

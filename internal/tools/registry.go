@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"claudego/pkg/interfaces"
+	"claudego/pkg/skill"
 	"claudego/pkg/types"
 )
 
@@ -230,5 +231,8 @@ func RegisterDefaults() {
 	}
 	if err := registry.Register(NewFileHandler()); err != nil {
 		panic("failed to register file handler: " + err.Error())
+	}
+	if err := registry.Register(NewLoadSkillTool(skill.GetSkillRegistry())); err != nil {
+		panic("failed to register skill tool: " + err.Error())
 	}
 }

@@ -32,17 +32,19 @@ func main() {
 	}
 
 	log := logger.GetLogger()
-	tools.RegisterDefaults()
-	registry := tools.GetRegistry()
 
 	// Load skills from ~/.claudego/skills/
-	skillRegistry := skill.NewRegistry()
+	skillRegistry := skill.GetSkillRegistry()
 	home, _ := os.UserHomeDir()
 	skillsDir := filepath.Join(home, ".claudego", "skills")
 	if err := skillRegistry.LoadFromDir(skillsDir); err != nil {
 		// Skills are optional - log warning but don't fail startup
 		log.Warning("Failed to load skills: %v", err)
 	}
+
+	tools.RegisterDefaults()
+	registry := tools.GetRegistry()
+
 
 	conv := conversation.New()
 	agent := loop.New(cfg, log, registry)
@@ -88,14 +90,16 @@ func main() {
 		stopListener := startInterruptListener(cancel)
 
 		// Check for skill slash commands
-		if matched, err := skill.MatchAndExecute(ctx, query, skillRegistry, agent.LLMClient(), registry); matched {
+		if matched, loadedSkill, err := skill.MatchAndExecute(ctx, query, skillRegistry, registry); matched {
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Skill error: %v\n", err)
+			} else if strings.TrimSpace(loadedSkill) != "" {
+				conv.AddUserMessage(loadedSkill)
 			}
-			stopListener()
-			cancel()
-			fmt.Println()
-			continue
+			// stopListener()
+			// cancel()
+			// fmt.Println()
+			// continue
 		}
 
 		if strings.HasPrefix(query, "/plan") {

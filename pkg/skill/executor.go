@@ -1,40 +1,36 @@
 package skill
 
 import (
-	"context"
 	"fmt"
+	"strings"
 
-	"claudego/pkg/interfaces"
-	"claudego/pkg/llm"
 	"claudego/pkg/types"
 )
 
-// Execute runs a skill with the given args and LLM client.
-func Execute(ctx context.Context, s *types.Skill, args string, llmClient *llm.Client, registry interfaces.ToolRegistry) error {
-	// Build system prompt: skill instructions + user args as context
-	system := s.Instructions
-	if args != "" {
-		system = system + "\n\nUser request: " + args
+// BuildContext renders a loaded skill into a context block that can be appended to the conversation.
+func BuildContext(s *types.Skill, args string) string {
+	if s == nil {
+		return ""
 	}
 
-	// Build initial user message with the skill context
-	messages := []types.Message{
-		{
-			Role:    "user",
-			Content: "Please help with the task described above.",
-		},
+	var builder strings.Builder
+	fmt.Fprintf(&builder, "Skill loaded: %s\n", s.Name)
+	builder.WriteString("This skill is now active for the rest of the conversation.\n")
+
+	if s.Description != "" {
+		fmt.Fprintf(&builder, "Description: %s\n", s.Description)
 	}
 
-	// Execute with LLM
-	result, err := llmClient.Complete(ctx, messages, system, registry)
-	if err != nil {
-		return fmt.Errorf("skill execution failed: %w", err)
+	if trimmedArgs := strings.TrimSpace(args); trimmedArgs != "" {
+		builder.WriteString("\nContext:\n")
+		builder.WriteString(trimmedArgs)
+		builder.WriteString("\n")
 	}
 
-	// Output the result
-	if result.Content != "" {
-		fmt.Println(result.Content)
+	if trimmedInstructions := strings.TrimSpace(s.Instructions); trimmedInstructions != "" {
+		builder.WriteString("\nInstructions:\n")
+		builder.WriteString(trimmedInstructions)
 	}
 
-	return nil
+	return strings.TrimSpace(builder.String())
 }

@@ -2,22 +2,22 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"claudego/pkg/interfaces"
-	"claudego/pkg/llm"
 	"claudego/pkg/ui"
 )
 
-// MatchAndExecute checks if input is a slash command and executes it if found.
-// Returns (matched, error):
-//   - (true, nil) if a skill was matched and executed successfully
-//   - (true, error) if a skill was matched but execution failed
-//   - (false, nil) if input is not a slash command
-func MatchAndExecute(ctx context.Context, input string, registry *Registry, llmClient *llm.Client, toolRegistry interfaces.ToolRegistry) (bool, error) {
+// MatchAndExecute checks if input is a slash command and loads the matching skill through the skill tool.
+// Returns (matched, output, error):
+//   - (true, output, nil) if a skill was matched and loaded successfully
+//   - (true, "", error) if a skill was matched but loading failed
+//   - (false, "", nil) if input is not a skill slash command
+func MatchAndExecute(ctx context.Context, input string, registry *Registry, toolRegistry interfaces.ToolRegistry) (bool, string, error) {
 	if !strings.HasPrefix(input, "/") {
-		return false, nil
+		return false, "", nil
 	}
 
 	// Parse slash command: /skill-name [args]
@@ -31,14 +31,32 @@ func MatchAndExecute(ctx context.Context, input string, registry *Registry, llmC
 	// Look up skill
 	s, ok := registry.Get(skillName)
 	if !ok {
-		return false, nil // Not a skill, let caller handle as regular command
+		return false, "", nil // Not a skill, let caller handle as regular command
 	}
 
-	// Execute skill
-	ui.Info(fmt.Sprintf("Executing skill: %s", s.Name))
-	if err := Execute(ctx, s, args, llmClient, toolRegistry); err != nil {
-		return true, err
+	tool, ok := toolRegistry.Get("load_skill")
+	if !ok {
+		return true, "", fmt.Errorf("load_skill tool is not registered")
 	}
 
-	return true, nil
+	ui.Info(fmt.Sprintf("Loading skill: %s", s.Name))
+
+	payload, err := json.Marshal(struct {
+		Skill   string `json:"skill"`
+		Context string `json:"context"`
+	}{
+		Skill:   s.Name,
+		Context: args,
+	})
+	if err != nil {
+		return true, "", fmt.Errorf("failed to build skill payload: %w", err)
+	}
+
+	output, err := tool.Execute(ctx, payload)
+	if err != nil {
+		return true, "", err
+	}
+
+	ui.Info(fmt.Sprintf("Loaded skill: %s", s.Name))
+	return true, output, nil
 }
