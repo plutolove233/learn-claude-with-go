@@ -30,6 +30,10 @@ func Load() (*Config, error) {
 }
 
 func DefaultConfigPath() string {
-	home, _ := os.UserHomeDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		// 降级到当前目录
+		return "./.claudego/config.json"
+	}
 	return filepath.Join(home, ".claudego", "config.json")
 }

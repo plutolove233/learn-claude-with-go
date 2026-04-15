@@ -24,21 +24,39 @@ var (
 
 func GetLogger() *Logger {
 	logOnce.Do(func() {
-		log = loggerToFile()
+		var err error
+		log, err = loggerToFile()
+		if err != nil {
+			// 降级到 stdout
+			fmt.Printf("警告: 无法初始化日志文件，使用标准输出: %v\n", err)
+			log = newStdoutLogger()
+		}
 		log.Info("日志初始化服务完成!")
 	})
 	return log
 }
 
+// newStdoutLogger 创建输出到 stdout 的 logger（fallback）
+func newStdoutLogger() *Logger {
+	logger := logrus.New()
+	logger.Out = os.Stdout
+	logger.SetLevel(logrus.DebugLevel)
+	logger.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05",
+	})
+	return &Logger{logger}
+}
+
 // 日志记录到文件
-func loggerToFile() *Logger {
+func loggerToFile() (*Logger, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		panic("Get user home dir failed: " + err.Error())
+		return nil, fmt.Errorf("get user home dir failed: %w", err)
 	}
 	logFilePath := filepath.Join(home, ".claudego", "logs")
 	if err := os.MkdirAll(logFilePath, 0755); err != nil {
-		panic("Create log directory failed: " + err.Error())
+		return nil, fmt.Errorf("create log directory failed: %w", err)
 	}
 
 	logFileName := "system.log"
@@ -49,9 +67,10 @@ func loggerToFile() *Logger {
 	// 写入文件
 	src, err := os.OpenFile(fileName, os.O_CREATE|os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 	if err != nil {
-		fmt.Println("err", err)
-		panic("Open log file failed: " + err.Error())
+		return nil, fmt.Errorf("open log file failed: %w", err)
 	}
+	// 注意：不要在这里 defer Close()，因为 logger 需要持续使用这个文件句柄
+	// rotatelogs 会管理文件的生命周期
 
 	// 实例化
 	logger := logrus.New()
@@ -94,7 +113,7 @@ func loggerToFile() *Logger {
 	// 新增 Hook
 	logger.AddHook(lfHook)
 
-	return &Logger{logger}
+	return &Logger{logger}, nil
 }
 
 func (l *Logger) Info(format string, args ...any) {
