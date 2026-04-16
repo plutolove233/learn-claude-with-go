@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"claudego/internal/config"
+	"claudego/internal/tools"
 	"claudego/pkg/interfaces"
 	"claudego/pkg/llm"
 	"claudego/pkg/logger"
@@ -34,6 +35,11 @@ func (a *Agent) LLMClient() *llm.Client {
 }
 
 func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
+	todo := tools.NewTodoManager()
+	err := a.registry.Register(todo)
+	if err != nil {
+		return fmt.Errorf("failed to register tool: %w", err)
+	}
 	pwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %w", err)
@@ -64,6 +70,14 @@ func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 			break
 		}
 
+		used_todo := false
+		for _, tc := range result.ToolCalls {
+			if tc.Function.Name == "todo_manager" {
+				used_todo = true
+				break
+			}
+		}
+
 		if len(result.ToolCalls) > 0 {
 			results := a.llmClient.ExecuteTools(ctx, result.ToolCalls, a.registry)
 
@@ -72,6 +86,14 @@ func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 			// Pass []ToolCallResult directly so BuildMessages emits proper
 			// ToolMessage entries instead of a freeform user string.
 			messages = append(messages, types.Message{Role: "user", Content: results})
+			if used_todo == false {
+				reminder := todo.NoteRoundWithoutUpdate()
+				if reminder != "" {
+					results = append(results, types.ToolCallResult{
+						Content: reminder,
+					})
+				}
+			}
 			continue
 		}
 		break
