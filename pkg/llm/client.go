@@ -37,7 +37,10 @@ func (c *Client) Model() string {
 }
 
 func (c *Client) Complete(ctx context.Context, messages []types.Message, system string, registry interfaces.ToolRegistry) (*types.CompleteResult, error) {
-	toolDefs := c.buildToolDefs(registry)
+	var toolDefs []openai.ChatCompletionToolUnionParam
+	if registry != nil {
+		toolDefs = c.buildToolDefs(registry)
+	}
 
 	stream := c.client.Chat.Completions.NewStreaming(ctx, openai.ChatCompletionNewParams{
 		Messages: c.buildMessages(messages, system),
@@ -71,9 +74,13 @@ func (c *Client) Complete(ctx context.Context, messages []types.Message, system 
 	var toolCallOrder []int
 	toolCallsByIdx := map[int]*partialToolCall{}
 	var finishReason string
+	usage := &types.TokenUsage{}
 
 	for stream.Next() {
 		event := stream.Current()
+		println(strings.Repeat("=", 20))
+		fmt.Printf("Received event: %+v\n", event)
+		println(strings.Repeat("=", 20))
 		if len(event.Choices) == 0 {
 			continue
 		}
@@ -82,6 +89,12 @@ func (c *Client) Complete(ctx context.Context, messages []types.Message, system 
 
 		if fr := string(event.Choices[0].FinishReason); fr != "" {
 			finishReason = fr
+		}
+
+		if event.Usage.PromptTokens > 0 || event.Usage.CompletionTokens > 0 || event.Usage.TotalTokens > 0 {
+			usage.PromptTokens = int(event.Usage.PromptTokens)
+			usage.CompletionTokens = int(event.Usage.CompletionTokens)
+			usage.TotalTokens = int(event.Usage.TotalTokens)
 		}
 
 		if delta.Content != "" {
@@ -127,10 +140,16 @@ func (c *Client) Complete(ctx context.Context, messages []types.Message, system 
 		})
 	}
 
+	var usageResult *types.TokenUsage
+	if usage.TotalTokens > 0 || usage.PromptTokens > 0 || usage.CompletionTokens > 0 {
+		usageResult = usage
+	}
+
 	return &types.CompleteResult{
 		Content:      fullContent.String(),
 		ToolCalls:    toolCalls,
 		FinishReason: finishReason,
+		Usage:        usageResult,
 	}, nil
 }
 

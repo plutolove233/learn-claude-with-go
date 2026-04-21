@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"claudego/pkg/types"
 )
 
 type Config struct {
-	APIKey  string `json:"api_key"`
-	BaseURL string `json:"base_url"`
-	Model   string `json:"model"`
+	APIKey           string                  `json:"api_key"`
+	BaseURL          string                  `json:"base_url"`
+	Model            string                  `json:"model"`
+	CompactionConfig *types.CompactionConfig `json:"compaction_config,omitempty"`
 }
 
 func Load() (*Config, error) {
@@ -25,6 +28,9 @@ func Load() (*Config, error) {
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	if cfg.CompactionConfig == nil {
+		cfg.CompactionConfig = types.DefaultCompactionConfig()
 	}
 	return &cfg, nil
 }

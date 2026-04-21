@@ -18,9 +18,17 @@ type ToolCallResult struct {
 	Content    string `json:"content"`
 }
 
+// TokenUsage records token usage from one model completion.
+type TokenUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // CompleteResult represents the result of an LLM completion, including content, tool calls, and finish reason.
 type CompleteResult struct {
 	Content      string
 	ToolCalls    []openai.ChatCompletionMessageToolCallUnion
 	FinishReason string
+	Usage        *TokenUsage `json:"usage,omitempty"`
 }

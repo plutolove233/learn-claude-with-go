@@ -33,7 +33,7 @@ func TestTodoManagerExecuteSuccess(t *testing.T) {
 	checks := []string{
 		"[ ] prepare",
 		"[>] coding (coding)",
-		"[x] done",
+		"[✓] done",
 		"(1/3 completed)",
 	}
 	for _, expected := range checks {
@@ -104,4 +104,3 @@ func TestTodoManagerReminderWithoutState(t *testing.T) {
 		t.Fatalf("expected empty reminder without state, got: %q", got)
 	}
 }
-

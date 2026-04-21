@@ -45,9 +45,12 @@ func main() {
 	tools.RegisterDefaults()
 	registry := tools.GetRegistry()
 
-
 	conv := conversation.New()
-	agent := loop.New(cfg, log, registry)
+	agent, err := loop.New(cfg, log, registry)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize agent: %v\n", err)
+		os.Exit(1)
+	}
 	executor := plan.NewExecutor(cfg, log, registry)
 
 	cwd, _ := os.Getwd()
@@ -104,16 +107,16 @@ func main() {
 
 		if strings.HasPrefix(query, "/plan") {
 			handlePlanCommand(ctx, executor, query)
-		} else if isComplexTask(query) {
-			ui.Info("Detected complex task - entering plan mode...")
-			if _, err := executor.RunWithPlan(ctx, query); err != nil {
-				if ctx.Err() != nil {
-					ui.Warning("Interrupted. Rolling back conversation.")
-				} else {
-					log.Warning("Plan execution failed: %v", err)
-					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				}
-			}
+			// } else if isComplexTask(query) {
+		// 	ui.Info("Detected complex task - entering plan mode...")
+		// 	if _, err := executor.RunWithPlan(ctx, query); err != nil {
+		// 		if ctx.Err() != nil {
+		// 			ui.Warning("Interrupted. Rolling back conversation.")
+		// 		} else {
+		// 			log.Warning("Plan execution failed: %v", err)
+		// 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		// 		}
+		// 	}
 		} else {
 			conv.AddUserMessage(query)
 			checkpoint := conv.Checkpoint()
@@ -221,21 +224,21 @@ func printPlanHelp() {
 	fmt.Println("  /plan status <id>       - Show plan status")
 }
 
-func isComplexTask(query string) bool {
-	complexKeywords := []string{
-		"refactor", "重构", "migrate", "迁移", "implement", "实现",
-		"build", "创建", "develop", "开发", "setup", "设置",
-		"convert", "转换", "upgrade", "升级", "audit",
-		"analyze", "分析", "design", "设计", "architecture",
-		"系统", "项目", "multiple", "several", "many",
-	}
+// func isComplexTask(query string) bool {
+// 	complexKeywords := []string{
+// 		"refactor", "重构", "migrate", "迁移", "implement", "实现",
+// 		"build", "创建", "develop", "开发", "setup", "设置",
+// 		"convert", "转换", "upgrade", "升级", "audit",
+// 		"analyze", "分析", "design", "设计", "architecture",
+// 		"系统", "项目", "multiple", "several", "many",
+// 	}
 
-	queryLower := strings.ToLower(query)
-	for _, kw := range complexKeywords {
-		if strings.Contains(queryLower, kw) {
-			return true
-		}
-	}
+// 	queryLower := strings.ToLower(query)
+// 	for _, kw := range complexKeywords {
+// 		if strings.Contains(queryLower, kw) {
+// 			return true
+// 		}
+// 	}
 
-	return strings.Contains(query, " and ") || strings.Contains(query, "、")
-}
+// 	return strings.Contains(query, " and ") || strings.Contains(query, "、")
+// }

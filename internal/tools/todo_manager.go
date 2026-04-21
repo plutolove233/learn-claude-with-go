@@ -137,10 +137,10 @@ func (t *TodoManager) NoteRoundWithoutUpdate() string {
 	if len(t.state) == 0 {
 		return ""
 	}
-	if t.roundSinceUpdate < INTERVAL {
+	if t.waitTodo <= 0 {
 		return ""
 	}
-	if t.waitTodo > 0 {
+	if t.roundSinceUpdate < INTERVAL {
 		return ""
 	}
 	return "<reminder>Refresh your current plan before continuing.</reminder>"
