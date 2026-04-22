@@ -78,9 +78,7 @@ func (c *Client) Complete(ctx context.Context, messages []types.Message, system 
 
 	for stream.Next() {
 		event := stream.Current()
-		println(strings.Repeat("=", 20))
-		fmt.Printf("Received event: %+v\n", event)
-		println(strings.Repeat("=", 20))
+		
 		if len(event.Choices) == 0 {
 			continue
 		}
