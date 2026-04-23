@@ -10,6 +10,7 @@
 - **LLM 流式响应** — 通过 `openai-go` SDK 封装 OpenAI API 兼容接口，支持流式文本补全与函数工具调用（Function Calling）
 - **计划模式（Plan Mode）** — 自动识别复杂任务（重构、迁移、多文件实现等），将任务分解为多步骤计划并逐一执行；计划以 JSON 格式持久化至 `~/.claudego/plans/`，支持通过 plan ID 恢复中断的任务
 - **内置工具** — 插件化的 `ToolRegistry` 架构，内置 `bash` 工具（含危险命令检测，拦截 `rm -rf /`、fork 炸弹等）和 `file_handler` 工具（文件读取/写入/编辑），支持扩展自定义工具
+- **图工作流运行时** — 新增 `pkg/graph` 包，提供类 LangGraph 的共享状态、顺序边、条件路由、循环保护、执行轨迹，以及基于现有 LLM 接口的节点适配能力
 - **对话状态管理** — 基于检查点（checkpoint）的对话回滚机制，确保中断后对话历史完整性
 - **日志轮转** — 基于 `logrus` 的结构化日志，文件日志按天轮转，保留 7 天
 
@@ -33,6 +34,7 @@ pkg/llm/                   — LLM 客户端，封装 openai-go SDK
 pkg/conversation/          — 对话状态管理，检查点/回滚机制
 pkg/ui/                    — 命令行样式、Markdown 渲染、流式输出
 pkg/logger/                — 单例日志记录器（logrus）
+pkg/graph/                 — 面向 supervisor / expert agent 编排的图工作流运行时
 pkg/skill/                 — Skill 扩展系统
   ├── skill_registry.go    — Skill 注册表
   ├── loader.go            — Markdown 文件加载器（支持文件夹结构）
@@ -127,6 +129,58 @@ description: Skill 功能描述
 
 在任何 LLM 调用过程中按 `Ctrl+C` 即可中断。当前查询前的对话状态将回滚至检查点，确保对话历史完整性。
 
+### 图工作流运行时
+
+`pkg/graph` 是一层轻量级编排运行时，适合在现有 `LLMClient` 和 `ToolRegistry` 基础上构建领域专业智能体。
+
+核心概念：
+
+- `graph.State`：图中所有节点共享的状态
+- `graph.AddEdge`：确定性的顺序流转
+- `graph.AddConditionalEdges`：supervisor 风格的条件分发
+- `graph.Command{Goto: ...}`：节点运行后动态 handoff
+- `graph.NewLLMNode(...)`：把现有 LLM 能力封装成图节点
+
+最小示例：
+
+```go
+g := graph.New(graph.WithMaxSteps(16))
+
+_ = g.AddNode("supervisor", func(ctx context.Context, state *graph.State) (*graph.Command, error) {
+	domain, _ := graph.Value[string](state, "domain")
+	return &graph.Command{Goto: domain}, nil
+})
+_ = g.AddNode("legal", func(ctx context.Context, state *graph.State) (*graph.Command, error) {
+	state.Set("answer", "由法律专家节点处理")
+	return nil, nil
+})
+_ = g.AddNode("medical", func(ctx context.Context, state *graph.State) (*graph.Command, error) {
+	state.Set("answer", "由医疗专家节点处理")
+	return nil, nil
+})
+
+_ = g.SetEntryPoint("supervisor")
+_ = g.AddEdge("legal", graph.End)
+_ = g.AddEdge("medical", graph.End)
+
+result, err := g.Run(ctx, map[string]any{"domain": "legal"})
+```
+
+也可以直接把现有 LLM 抽象包装成节点：
+
+```go
+node, _ := graph.NewLLMNode(graph.LLMNodeConfig{
+	Client:       llmClient,
+	Registry:     toolRegistry,
+	SystemPrompt: "你是法律合规专家。",
+	BuildUserPrompt: func(state *graph.State) string {
+		task, _ := graph.Value[string](state, "task")
+		return task
+	},
+	ResponseKey: "specialist_output",
+})
+```
+
 ## 依赖
 
 - [openai-go](https://github.com/openai/openai-go) — LLM API 客户端
@@ -146,6 +200,7 @@ claudego/
 │   └── config/                # 配置加载
 ├── pkg/
 │   ├── llm/                   # LLM 客户端
+│   ├── graph/                 # 图工作流运行时
 │   ├── conversation/          # 对话状态
 │   ├── ui/                    # 命令行样式
 │   ├── logger/                # 日志记录

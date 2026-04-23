@@ -10,6 +10,7 @@ A CLI-based AI coding agent written in Go, powered by LLMs via a streaming REPL 
 - **LLM Streaming** — Wraps OpenAI-compatible API via `openai-go` SDK with streaming text completions and function calling (tool use)
 - **Plan Mode** — Automatically detects complex tasks (refactor, migrate, multi-file implementation, etc.), decomposes them into multi-step plans executed sequentially; plans persisted as JSON to `~/.claudego/plans/`, resumable by plan ID
 - **Built-in Tools** — Plugin-style `ToolRegistry` architecture with `bash` tool (dangerous command detection: blocks `rm -rf /`, fork bombs, remote script injection, etc.) and `file_handler` tool (read/write/edit files); extensible with custom tools
+- **Graph Workflow Runtime** — New `pkg/graph` package provides a LangGraph-style workflow layer with shared state, deterministic edges, conditional routing, loop protection, execution trace, and LLM-backed nodes
 - **Conversation State Management** — Checkpoint-based rollback mechanism preserves conversation history integrity across interrupts
 - **Rotating Logs** — Structured logging via `logrus` with daily file rotation, 7-day retention
 
@@ -33,6 +34,7 @@ pkg/llm/                   — LLM client wrapping openai-go SDK
 pkg/conversation/          — Conversation state with checkpoint/rollback
 pkg/ui/                    — CLI styling, markdown rendering, streaming output
 pkg/logger/                — Singleton logger (logrus)
+pkg/graph/                 — Graph workflow runtime for supervisor/expert agent orchestration
 pkg/skill/                 — Skill extension system
   ├── skill_registry.go    — Skill registry
   ├── loader.go            — Markdown loader (folder-based structure supported)
@@ -127,6 +129,58 @@ Loaded skills can be invoked via `/skill skill-name` or triggered via auto-compl
 
 Press `Ctrl+C` during any LLM call to interrupt. The conversation state is rolled back to the checkpoint before the current query, preserving the integrity of your conversation history.
 
+### Graph Workflow Runtime
+
+`pkg/graph` is a lightweight orchestration layer for building domain-specific multi-step agents on top of the existing `LLMClient` and `ToolRegistry` interfaces.
+
+Core concepts:
+
+- `graph.State` is the shared memory passed across all nodes
+- `graph.AddEdge` models deterministic transitions
+- `graph.AddConditionalEdges` enables supervisor-style routing
+- `graph.Command{Goto: ...}` lets a node hand off dynamically
+- `graph.NewLLMNode(...)` wraps the existing LLM client into a reusable node
+
+Minimal example:
+
+```go
+g := graph.New(graph.WithMaxSteps(16))
+
+_ = g.AddNode("supervisor", func(ctx context.Context, state *graph.State) (*graph.Command, error) {
+	domain, _ := graph.Value[string](state, "domain")
+	return &graph.Command{Goto: domain}, nil
+})
+_ = g.AddNode("legal", func(ctx context.Context, state *graph.State) (*graph.Command, error) {
+	state.Set("answer", "legal specialist handled the request")
+	return nil, nil
+})
+_ = g.AddNode("medical", func(ctx context.Context, state *graph.State) (*graph.Command, error) {
+	state.Set("answer", "medical specialist handled the request")
+	return nil, nil
+})
+
+_ = g.SetEntryPoint("supervisor")
+_ = g.AddEdge("legal", graph.End)
+_ = g.AddEdge("medical", graph.End)
+
+result, err := g.Run(ctx, map[string]any{"domain": "legal"})
+```
+
+You can also build a node from the existing LLM abstraction:
+
+```go
+node, _ := graph.NewLLMNode(graph.LLMNodeConfig{
+	Client:       llmClient,
+	Registry:     toolRegistry,
+	SystemPrompt: "You are a legal compliance specialist.",
+	BuildUserPrompt: func(state *graph.State) string {
+		task, _ := graph.Value[string](state, "task")
+		return task
+	},
+	ResponseKey: "specialist_output",
+})
+```
+
 ## Dependencies
 
 - [openai-go](https://github.com/openai/openai-go) — LLM API client
@@ -146,6 +200,7 @@ claudego/
 │   └── config/                # Configuration loader
 ├── pkg/
 │   ├── llm/                   # LLM client
+│   ├── graph/                 # Graph workflow runtime
 │   ├── conversation/          # Conversation state
 │   ├── ui/                    # CLI output styling
 │   ├── logger/                # Logging

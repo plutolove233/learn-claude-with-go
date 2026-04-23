@@ -22,7 +22,7 @@ type TodoManager struct {
 	BaseTool[TodoManagerInput]
 	state            []PlanItem
 	roundSinceUpdate int
-	waitTodo         int
+	openItems        int
 }
 
 func NewTodoManager() *TodoManager {
@@ -33,7 +33,7 @@ func NewTodoManager() *TodoManager {
 			extraValidate: nil,
 		},
 		roundSinceUpdate: 0,
-		waitTodo:         0,
+		openItems:        0,
 	}
 	t.fn = t.todoManagerExecute
 	return t
@@ -79,7 +79,7 @@ func (t *TodoManager) Metadata() types.ToolMetadata {
 
 func (t *TodoManager) todoManagerExecute(input TodoManagerInput) (string, error) {
 	t.roundSinceUpdate = 0
-	t.waitTodo = 0
+	t.openItems = 0
 	if len(input.PlanItems) > 12 {
 		return "", fmt.Errorf("too many plan items provided, maximum is 12")
 	}
@@ -89,8 +89,8 @@ func (t *TodoManager) todoManagerExecute(input TodoManagerInput) (string, error)
 		if item.Status == "in_progress" {
 			in_progress_count++
 		}
-		if item.Status == "pending" {
-			t.waitTodo++
+		if item.Status != "completed" {
+			t.openItems++
 		}
 	}
 
@@ -137,7 +137,7 @@ func (t *TodoManager) NoteRoundWithoutUpdate() string {
 	if len(t.state) == 0 {
 		return ""
 	}
-	if t.waitTodo <= 0 {
+	if t.openItems <= 0 {
 		return ""
 	}
 	if t.roundSinceUpdate < INTERVAL {
