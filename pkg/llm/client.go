@@ -8,6 +8,7 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/param"
 	"github.com/openai/openai-go/v3/shared"
 	"github.com/openai/openai-go/v3/shared/constant"
 
@@ -46,6 +47,9 @@ func (c *Client) Complete(ctx context.Context, messages []types.Message, system 
 		Messages: c.buildMessages(messages, system),
 		Model:    shared.ChatModel(c.model),
 		Tools:    toolDefs,
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: param.Opt[bool]{Value: true},
+		},
 	})
 	defer stream.Close()
 
@@ -78,7 +82,7 @@ func (c *Client) Complete(ctx context.Context, messages []types.Message, system 
 
 	for stream.Next() {
 		event := stream.Current()
-		
+
 		if len(event.Choices) == 0 {
 			continue
 		}
