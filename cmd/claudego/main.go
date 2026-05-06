@@ -11,7 +11,6 @@ import (
 
 	"claudego/internal/config"
 	"claudego/internal/loop"
-	"claudego/internal/plan"
 	"claudego/internal/tools"
 	"claudego/pkg/conversation"
 	"claudego/pkg/logger"
@@ -51,7 +50,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to initialize agent: %v\n", err)
 		os.Exit(1)
 	}
-	executor := plan.NewExecutor(cfg, log, registry)
 
 	cwd, _ := os.Getwd()
 	cwd, _ = utils.AbsToTilde(cwd)
@@ -106,7 +104,7 @@ func main() {
 		}
 
 		if strings.HasPrefix(query, "/plan") {
-			handlePlanCommand(ctx, executor, query)
+			
 			// } else if isComplexTask(query) {
 		// 	ui.Info("Detected complex task - entering plan mode...")
 		// 	if _, err := executor.RunWithPlan(ctx, query); err != nil {
@@ -159,86 +157,3 @@ func startInterruptListener(cancel context.CancelFunc) (stop func()) {
 
 	return func() { close(done) }
 }
-
-// -------- 以下函数无改动 --------
-
-func handlePlanCommand(ctx context.Context, executor *plan.Executor, cmd string) {
-	args := strings.Fields(cmd)
-	if len(args) < 2 {
-		printPlanHelp()
-		return
-	}
-
-	switch args[1] {
-	case "list":
-		plans, err := plan.ListPlans()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error listing plans: %v\n", err)
-			return
-		}
-		if len(plans) == 0 {
-			fmt.Println("No plans found.")
-			return
-		}
-		ui.Info("Plans:")
-		for _, p := range plans {
-			fmt.Printf("  %s - %s (%s) [%s]\n", p.ID, p.Name, p.Goal, p.Status)
-		}
-
-	case "resume":
-		if len(args) < 3 {
-			fmt.Println("Usage: /plan resume <plan_id>")
-			return
-		}
-		p, err := plan.LoadPlan(args[2])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading plan: %v\n", err)
-			return
-		}
-		ui.Info(fmt.Sprintf("Resuming plan: %s", p.Name))
-		if err := executor.ResumePlan(ctx, p); err != nil {
-			fmt.Fprintf(os.Stderr, "Error resuming plan: %v\n", err)
-		}
-
-	case "status":
-		if len(args) < 3 {
-			fmt.Println("Usage: /plan status <plan_id>")
-			return
-		}
-		p, err := plan.LoadPlan(args[2])
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading plan: %v\n", err)
-			return
-		}
-		executor.DisplayPlan(p)
-
-	default:
-		printPlanHelp()
-	}
-}
-
-func printPlanHelp() {
-	ui.Info("Plan Commands:")
-	fmt.Println("  /plan list              - List all plans")
-	fmt.Println("  /plan resume <id>       - Resume a paused plan")
-	fmt.Println("  /plan status <id>       - Show plan status")
-}
-
-// func isComplexTask(query string) bool {
-// 	complexKeywords := []string{
-// 		"refactor", "重构", "migrate", "迁移", "implement", "实现",
-// 		"build", "创建", "develop", "开发", "setup", "设置",
-// 		"convert", "转换", "upgrade", "升级", "audit",
-// 		"analyze", "分析", "design", "设计", "architecture",
-// 		"系统", "项目", "multiple", "several", "many",
-// 	}
-
-// 	queryLower := strings.ToLower(query)
-// 	for _, kw := range complexKeywords {
-// 		if strings.Contains(queryLower, kw) {
-// 			return true
-// 		}
-// 	}
-
-// 	return strings.Contains(query, " and ") || strings.Contains(query, "、")
-// }
