@@ -1,8 +1,13 @@
 package ui
 
 import (
+	"bufio"
+	"context"
 	"fmt"
+	"os"
 	"strings"
+
+	"claudego/pkg/permissions"
 
 	"github.com/mattn/go-runewidth"
 )
@@ -14,7 +19,7 @@ const (
 	ColorSuccess = "38;2;105;219;124"
 	ColorError   = "38;2;220;95;105"
 	ColorMuted   = "38;2;150;150;150"
-	Reset       = "0"
+	Reset        = "0"
 )
 
 const (
@@ -112,6 +117,94 @@ func ToolCall(name, args string) {
 		fmt.Println(paint(BorderVertical+" "+padRight(line, width-4)+" "+BorderVertical, ColorDefault, ""))
 	}
 	fmt.Println(bot)
+}
+
+type PermissionPrompter struct{}
+
+func (PermissionPrompter) PromptToolPermission(ctx context.Context, req permissions.PromptRequest) (permissions.PromptDecision, error) {
+	renderPermissionPrompt(req)
+
+	type response struct {
+		answer string
+		err    error
+	}
+	ch := make(chan response, 1)
+	go func() {
+		reader := bufio.NewReader(os.Stdin)
+		answer, err := reader.ReadString('\n')
+		ch <- response{answer: answer, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return permissions.PromptDeny, ctx.Err()
+	case res := <-ch:
+		if res.err != nil {
+			return permissions.PromptDeny, res.err
+		}
+		switch strings.ToLower(strings.TrimSpace(res.answer)) {
+		case "y", "yes":
+			return permissions.PromptAllowOnce, nil
+		case "a", "always":
+			return permissions.PromptAlwaysAllowSession, nil
+		default:
+			return permissions.PromptDeny, nil
+		}
+	}
+}
+
+func renderPermissionPrompt(req permissions.PromptRequest) {
+	const width = 72
+	innerWidth := width - 4
+	title := " Permission required "
+	topFill := width - 2 - runewidth.StringWidth(title)
+	if topFill < 0 {
+		topFill = 0
+	}
+
+	fmt.Println()
+	fmt.Println(paint(BorderTopLeft+title+strings.Repeat(BorderHorizontal, topFill)+BorderTopRight, ColorWarning, ""))
+	for _, line := range permissionFieldLines("Tool", req.ToolName, innerWidth) {
+		fmt.Println(permissionPromptRow(line, innerWidth))
+	}
+	for _, line := range permissionFieldLines("Input", string(req.Arguments), innerWidth) {
+		fmt.Println(permissionPromptRow(line, innerWidth))
+	}
+	if reason := strings.TrimSpace(req.Reason); reason != "" {
+		for _, line := range permissionFieldLines("Reason", reason, innerWidth) {
+			fmt.Println(permissionPromptRow(line, innerWidth))
+		}
+	}
+	fmt.Println(paint(BorderBottomLeft+strings.Repeat(BorderHorizontal, width-2)+BorderBottomRight, ColorWarning, ""))
+
+	allowOnce := paint("[y]", ColorSuccess, "1") + paint(" allow once", ColorDefault, "")
+	allowSession := paint("[a]", ColorTitle, "1") + paint(" always allow this session", ColorDefault, "")
+	deny := paint("[n]", ColorError, "1") + paint(" deny", ColorDefault, "")
+	fmt.Print("  " + allowOnce + paint("  ", ColorMuted, "") + allowSession + paint("  ", ColorMuted, "") + deny + paint(": ", ColorMuted, ""))
+}
+
+func permissionFieldLines(label, value string, width int) []string {
+	labelText := paint(label+":", ColorMuted, "")
+	prefixWidth := 10
+	valueWidth := width - prefixWidth
+	if valueWidth < 8 {
+		valueWidth = 8
+	}
+
+	lines := wrapText(value, valueWidth)
+	out := make([]string, 0, len(lines))
+	for i, line := range lines {
+		if i == 0 {
+			out = append(out, padRight(labelText, prefixWidth)+paint(line, ColorDefault, ""))
+			continue
+		}
+		out = append(out, strings.Repeat(" ", prefixWidth)+paint(line, ColorDefault, ""))
+	}
+	return out
+}
+
+func permissionPromptRow(content string, width int) string {
+	return paint(BorderVertical+" ", ColorWarning, "") + padRight(content, width) + paint(" "+BorderVertical, ColorWarning, "")
 }
 
 func wrapText(text string, maxWidth int) []string {

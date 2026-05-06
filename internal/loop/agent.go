@@ -15,20 +15,23 @@ import (
 	"claudego/pkg/interfaces"
 	"claudego/pkg/llm"
 	"claudego/pkg/logger"
+	"claudego/pkg/permissions"
 	"claudego/pkg/types"
+	"claudego/pkg/ui"
 )
 
 type Agent struct {
-	cfg       	*config.Config
-	logger    	*logger.Logger
-	registry  	interfaces.ToolRegistry
-	llmClient 	*llm.Client
+	cfg         *config.Config
+	logger      *logger.Logger
+	registry    interfaces.ToolRegistry
+	llmClient   *llm.Client
+	permissions *permissions.Manager
 
-	compactor     	*compaction.Compactor
-	sessionID     	string
-	sessionTokens 	int
+	compactor     *compaction.Compactor
+	sessionID     string
+	sessionTokens int
 
-	todo 			*tools.TodoManager
+	todo *tools.TodoManager
 }
 
 func New(cfg *config.Config, l *logger.Logger, r interfaces.ToolRegistry) (*Agent, error) {
@@ -49,12 +52,18 @@ func New(cfg *config.Config, l *logger.Logger, r interfaces.ToolRegistry) (*Agen
 		return nil, fmt.Errorf("failed to register tool: %w", err)
 	}
 
+	permissionConfig := permissions.Config{}
+	if cfg.Permissions != nil {
+		permissionConfig = *cfg.Permissions
+	}
+	permissionManager := permissions.NewManager(permissionConfig, ui.PermissionPrompter{})
 
 	return &Agent{
 		cfg:           cfg,
 		logger:        l,
 		registry:      r,
 		llmClient:     llmClient,
+		permissions:   permissionManager,
 		compactor:     compactor,
 		sessionID:     sessionID,
 		sessionTokens: 0,
@@ -155,7 +164,9 @@ func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 		}
 
 		if len(result.ToolCalls) > 0 {
-			results := a.llmClient.ExecuteTools(ctx, result.ToolCalls, a.registry)
+			results := a.llmClient.ExecuteToolsWithOptions(ctx, result.ToolCalls, a.registry, llm.ToolExecutionOptions{
+				Permissions: a.permissions,
+			})
 			results, err = a.compactor.ProcessToolResults(a.sessionID, results)
 			if err != nil {
 				a.logger.Warning("L1 compression failed: %v", err)

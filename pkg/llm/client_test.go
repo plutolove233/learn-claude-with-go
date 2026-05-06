@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3"
@@ -10,6 +11,7 @@ import (
 
 	"claudego/internal/config"
 	"claudego/pkg/interfaces"
+	"claudego/pkg/permissions"
 	"claudego/pkg/types"
 )
 
@@ -319,6 +321,18 @@ func (m *MockToolRegistry) List() []interfaces.Tool {
 	return tools
 }
 
+type denyingPermissionManager struct{}
+
+func (m denyingPermissionManager) Decide(ctx context.Context, req permissions.Request) permissions.Decision {
+	return permissions.Decision{Action: permissions.DecisionDeny, Reason: "test denial"}
+}
+
+type allowingPermissionManager struct{}
+
+func (m allowingPermissionManager) Decide(ctx context.Context, req permissions.Request) permissions.Decision {
+	return permissions.Decision{Action: permissions.DecisionAllow, Reason: "test allow"}
+}
+
 // TestBuildToolDefs tests building tool definitions
 func TestBuildToolDefs_EmptyRegistry(t *testing.T) {
 	client := &Client{model: "test-model"}
@@ -375,6 +389,63 @@ func TestExecuteTools_ToolNotFound(t *testing.T) {
 	assert.Contains(t, results[0].Content, "Error: tool \"nonexistent_tool\" not found")
 	assert.Equal(t, "call_123", results[0].ToolCallID)
 	assert.Equal(t, "nonexistent_tool", results[0].Name)
+}
+
+func TestExecuteToolsWithOptionsDeniedCallDoesNotExecute(t *testing.T) {
+	client := &Client{}
+	registry := NewMockToolRegistry()
+	called := false
+	registry.RegisterMock("danger", &MockTool{
+		name: "danger",
+		executeFunc: func(ctx context.Context, input []byte) (string, error) {
+			called = true
+			return "executed", nil
+		},
+	})
+
+	results := client.ExecuteToolsWithOptions(context.Background(), []openai.ChatCompletionMessageToolCallUnion{
+		{
+			ID:   "call_1",
+			Type: "function",
+			Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+				Name:      "danger",
+				Arguments: `{"value":"x"}`,
+			},
+		},
+	}, registry, ToolExecutionOptions{Permissions: denyingPermissionManager{}})
+
+	if called {
+		t.Fatal("expected denied tool not to execute")
+	}
+	if len(results) != 1 || !strings.Contains(results[0].Content, "permission denied") {
+		t.Fatalf("unexpected result: %#v", results)
+	}
+}
+
+func TestExecuteToolsWithOptionsAllowedCallExecutes(t *testing.T) {
+	client := &Client{}
+	registry := NewMockToolRegistry()
+	registry.RegisterMock("safe", &MockTool{
+		name: "safe",
+		executeFunc: func(ctx context.Context, input []byte) (string, error) {
+			return "executed", nil
+		},
+	})
+
+	results := client.ExecuteToolsWithOptions(context.Background(), []openai.ChatCompletionMessageToolCallUnion{
+		{
+			ID:   "call_1",
+			Type: "function",
+			Function: openai.ChatCompletionMessageFunctionToolCallFunction{
+				Name:      "safe",
+				Arguments: `{"value":"x"}`,
+			},
+		},
+	}, registry, ToolExecutionOptions{Permissions: allowingPermissionManager{}})
+
+	if len(results) != 1 || results[0].Content != "executed" {
+		t.Fatalf("unexpected result: %#v", results)
+	}
 }
 
 // TestExecuteTools_Success tests successful tool execution

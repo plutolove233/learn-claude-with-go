@@ -60,13 +60,24 @@ Create `~/.claudego/config.json`:
 {
   "api_key": "your-api-key",
   "base_url": "https://api.deepseek.com/v1",
-  "model": "deepseek-chat"
+  "model": "deepseek-chat",
+  "permissions": {
+    "allow": ["file_handler(read:*)"],
+    "ask": ["bash(*)", "file_handler(write:*)"],
+    "deny": ["bash(sudo *)", "file_handler(*:.env*)"]
+  }
 }
 ```
 
 - `api_key` — Your LLM provider API key
 - `base_url` — OpenAI-compatible API endpoint
 - `model` — Model name (e.g. `deepseek-chat`, `gpt-4o`)
+
+### Tool Permissions
+
+ClaudeGo checks every tool call before execution. Permission rules support `allow`, `ask`, and `deny`; `deny` wins over all other rules.
+
+Built-in defaults allow file reads, ask before file writes and bash commands, allow `load_skill` and `todo_manager`, and ask for unknown tools. Choosing "always allow this session" only affects the current process and does not modify the config file.
 
 ## Usage
 

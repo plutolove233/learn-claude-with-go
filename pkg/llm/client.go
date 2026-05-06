@@ -14,6 +14,7 @@ import (
 
 	"claudego/internal/config"
 	"claudego/pkg/interfaces"
+	"claudego/pkg/permissions"
 	"claudego/pkg/types"
 	"claudego/pkg/ui"
 )
@@ -21,6 +22,14 @@ import (
 type Client struct {
 	client openai.Client
 	model  string
+}
+
+type PermissionDecider interface {
+	Decide(ctx context.Context, req permissions.Request) permissions.Decision
+}
+
+type ToolExecutionOptions struct {
+	Permissions PermissionDecider
 }
 
 func NewClient(cfg *config.Config) *Client {
@@ -205,6 +214,10 @@ func (c *Client) buildToolDefs(registry interfaces.ToolRegistry) []openai.ChatCo
 }
 
 func (c *Client) ExecuteTools(ctx context.Context, toolCalls []openai.ChatCompletionMessageToolCallUnion, registry interfaces.ToolRegistry) []types.ToolCallResult {
+	return c.ExecuteToolsWithOptions(ctx, toolCalls, registry, ToolExecutionOptions{})
+}
+
+func (c *Client) ExecuteToolsWithOptions(ctx context.Context, toolCalls []openai.ChatCompletionMessageToolCallUnion, registry interfaces.ToolRegistry, opts ToolExecutionOptions) []types.ToolCallResult {
 	var results []types.ToolCallResult
 	enabledTools := registry.EnabledTools()
 
@@ -219,6 +232,23 @@ func (c *Client) ExecuteTools(ctx context.Context, toolCalls []openai.ChatComple
 		input := []byte(fn.Arguments)
 		var output string
 		var toolFound bool
+
+		if opts.Permissions != nil {
+			decision := opts.Permissions.Decide(ctx, permissions.Request{
+				ToolName:  fn.Name,
+				Arguments: input,
+			})
+			if decision.Action == permissions.DecisionDeny {
+				output = fmt.Sprintf("Error: permission denied for %s: %s", fn.Name, decision.Reason)
+				ui.ToolOutput(output)
+				results = append(results, types.ToolCallResult{
+					Name:       fn.Name,
+					ToolCallID: tc.ID,
+					Content:    output,
+				})
+				continue
+			}
+		}
 
 		for _, t := range enabledTools {
 			if t.Name() == fn.Name {

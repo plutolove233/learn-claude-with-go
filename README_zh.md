@@ -60,13 +60,24 @@ go build -o claudego ./cmd/claudego
 {
   "api_key": "your-api-key",
   "base_url": "https://api.deepseek.com/v1",
-  "model": "deepseek-chat"
+  "model": "deepseek-chat",
+  "permissions": {
+    "allow": ["file_handler(read:*)"],
+    "ask": ["bash(*)", "file_handler(write:*)"],
+    "deny": ["bash(sudo *)", "file_handler(*:.env*)"]
+  }
 }
 ```
 
 - `api_key` — LLM 服务商 API 密钥
 - `base_url` — OpenAI 兼容 API 端点
 - `model` — 模型名称（如 `deepseek-chat`、`gpt-4o`）
+
+### 工具权限
+
+ClaudeGo 会在每次工具执行前检查权限。权限规则支持 `allow`、`ask`、`deny`，其中 `deny` 优先级最高。
+
+内置默认策略允许读取文件，执行文件写入和 bash 命令前会询问用户，允许 `load_skill` 和 `todo_manager`，未知工具默认询问。选择“本会话始终允许”只影响当前进程，不会写回配置文件。
 
 ## 使用方法
 

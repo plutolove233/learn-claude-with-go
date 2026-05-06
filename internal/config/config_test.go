@@ -20,6 +20,30 @@ func TestConfigJSON(t *testing.T) {
 	assert.Equal(t, "test-model", cfg.Model)
 }
 
+func TestConfigIncludesPermissions(t *testing.T) {
+	data := []byte(`{
+		"api_key": "key",
+		"base_url": "https://example.com/v1",
+		"model": "test-model",
+		"permissions": {
+			"allow": ["file_handler(read:*)"],
+			"ask": ["bash(*)"],
+			"deny": ["bash(sudo *)"]
+		}
+	}`)
+
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	if cfg.Permissions == nil {
+		t.Fatal("expected permissions config")
+	}
+	if got := cfg.Permissions.Allow[0]; got != "file_handler(read:*)" {
+		t.Fatalf("unexpected allow rule: %s", got)
+	}
+}
+
 func TestDefaultConfigPath_NormalCase(t *testing.T) {
 	path := DefaultConfigPath()
 
