@@ -1,14 +1,16 @@
 package types
 
 import (
-	"github.com/openai/openai-go/v3"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 // Message represents a conversation message
 type Message struct {
-	Role      string
-	Content   any                                         // string or []ToolCallResult
-	ToolCalls []openai.ChatCompletionMessageToolCallUnion // populated for assistant messages
+	Role             string
+	ReasoningContent string            // populated for assistant messages with reasoning
+	Content          string            // string or []ToolCallResult
+	ToolCalls        []openai.ToolCall // populated for assistant messages
+	ToolResults      []ToolCallResult
 }
 
 // ToolCallResult represents the result of a tool execution
@@ -27,8 +29,9 @@ type TokenUsage struct {
 
 // CompleteResult represents the result of an LLM completion, including content, tool calls, and finish reason.
 type CompleteResult struct {
-	Content      string
-	ToolCalls    []openai.ChatCompletionMessageToolCallUnion
-	FinishReason string
-	Usage        *TokenUsage `json:"usage,omitempty"`
+	Content          string
+	ToolCalls        []openai.ToolCall
+	FinishReason     string
+	Usage            *TokenUsage `json:"usage,omitempty"`
+	ReasoningContent string      `json:"reasoning_content,omitempty"`
 }

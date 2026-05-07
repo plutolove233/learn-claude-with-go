@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"claudego/internal/tools"
 	"claudego/pkg/interfaces"
 	"claudego/pkg/types"
 )
@@ -79,7 +80,7 @@ func NewLLMNode(cfg LLMNodeConfig) (NodeFunc, error) {
 				return nil, fmt.Errorf("context cancelled during tool execution: %w", err)
 			}
 
-			toolResults := cfg.Client.ExecuteTools(ctx, result.ToolCalls, cfg.Registry)
+			toolResults := tools.ExecuteTools(ctx, result.ToolCalls, cfg.Registry, tools.ToolExecutionOptions{})
 
 			// Check for tool errors if FailOnToolError is enabled
 			if cfg.FailOnToolError {
@@ -106,7 +107,8 @@ func NewLLMNode(cfg LLMNodeConfig) (NodeFunc, error) {
 				},
 				types.Message{
 					Role:    "user",
-					Content: toolResults,
+					Content: "",
+					ToolResults: toolResults,
 				},
 			)
 

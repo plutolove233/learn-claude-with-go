@@ -129,10 +129,7 @@ func (c *Compactor) CompactOldMessages(messages []types.Message, currentRound in
 		if msg.Role != "user" {
 			continue
 		}
-		results, ok := msg.Content.([]types.ToolCallResult)
-		if !ok {
-			continue
-		}
+		results := msg.ToolResults
 
 		for j := range results {
 			result := &results[j]
@@ -144,7 +141,7 @@ func (c *Compactor) CompactOldMessages(messages []types.Message, currentRound in
 				result.Content = string(runes[:200]) + "\\n[...截断，完整内容见磁盘文件...]"
 			}
 		}
-		msg.Content = results
+		msg.ToolResults = results
 	}
 
 	return nil

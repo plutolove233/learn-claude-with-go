@@ -68,13 +68,14 @@ func main() {
 	rootCtx := context.Background()
 
 	for {
-		query, err := line.Prompt(">_ ")
-		if err != nil {
-			if err == liner.ErrPromptAborted {
-				continue
-			}
-			break
-		}
+		// query, err := line.Prompt(">_ ")
+		// if err != nil {
+		// 	if err == liner.ErrPromptAborted {
+		// 		continue
+		// 	}
+		// 	break
+		// }
+		query := "在当前目录下新建一个 hello world 的 python 脚本"
 
 		query = strings.TrimSpace(query)
 		if query == "" || query == "q" || query == "exit" {

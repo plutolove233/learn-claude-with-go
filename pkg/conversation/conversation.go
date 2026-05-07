@@ -51,8 +51,8 @@ func (c *Conversation) AddToolResults(results []types.ToolCallResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.messages = append(c.messages, types.Message{
-		Role:    "user",
-		Content: results,
+		Role:        "user",
+		ToolResults: results,
 	})
 }
 

@@ -55,28 +55,26 @@ func (s *Summarizer) buildSummaryPrompt(messages []types.Message, sessionID stri
 		b.WriteString(strings.ToUpper(msg.Role))
 		b.WriteString("]\\n")
 
-		switch v := msg.Content.(type) {
-		case string:
-			if len(v) > 500 {
-				b.WriteString(v[:500])
+		v := msg.Content
+		
+		if len(v) > 500 {
+			b.WriteString(v[:500])
+			b.WriteString("\\n[...内容已截断...]\\n")
+		} else {
+			b.WriteString(v)
+			b.WriteString("\\n")
+		}
+
+		r := msg.ToolResults
+		for _, result := range r {
+			b.WriteString(fmt.Sprintf("工具: %s\\n", result.Name))
+			if len(result.Content) > 200 {
+				b.WriteString(result.Content[:200])
 				b.WriteString("\\n[...内容已截断...]\\n")
 			} else {
-				b.WriteString(v)
+				b.WriteString(result.Content)
 				b.WriteString("\\n")
 			}
-		case []types.ToolCallResult:
-			for _, result := range v {
-				b.WriteString(fmt.Sprintf("工具: %s\\n", result.Name))
-				if len(result.Content) > 200 {
-					b.WriteString(result.Content[:200])
-					b.WriteString("\\n[...内容已截断...]\\n")
-				} else {
-					b.WriteString(result.Content)
-					b.WriteString("\\n")
-				}
-			}
-		default:
-			b.WriteString("[不可序列化消息类型]\\n")
 		}
 	}
 

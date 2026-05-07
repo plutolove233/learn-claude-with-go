@@ -4,6 +4,7 @@ import (
 	"claudego/pkg/types"
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -53,7 +54,8 @@ func bashExecute(input BashInput) (string, error) {
 	if ctx.Err() == context.DeadlineExceeded {
 		return "", errors.New("timeout (120s)")
 	}
-	return string(out), err
+	result := fmt.Sprintf("command %s executed successfully, output: %s", input.Command, string(out))
+	return result, err
 }
 
 // dangerousPatterns holds compiled regexes that describe commands too risky

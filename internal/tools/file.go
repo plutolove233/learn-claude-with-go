@@ -97,7 +97,11 @@ func fileExecute(input fileHandlerInput) (string, error) {
 	case "read":
 		return readfile(input.Path)
 	case "write":
-		return "", writefile(input.Path, input.Content)
+		err := writefile(input.Path, input.Content)
+		if err != nil {
+			return "", err
+		}
+		return "File written successfully", nil
 	default:
 		return "", errors.New("invalid action: must be 'read' or 'write'")
 	}

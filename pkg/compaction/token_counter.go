@@ -20,21 +20,18 @@ func NewTokenCounter() *TokenCounter {
 func (tc *TokenCounter) CountMessage(msg types.Message) int {
 	var content string
 
-	switch v := msg.Content.(type) {
-	case string:
+	if msg.Content != "" {
+		v := msg.Content
 		content = v
-	case []types.ToolCallResult:
+	}
+	if msg.ToolResults != nil {
+		v := msg.ToolResults
 		data, err := json.Marshal(v)
 		if err != nil {
 			for _, result := range v {
 				content += result.ToolCallID + result.Name + result.Content
 			}
 		} else {
-			content = string(data)
-		}
-	default:
-		data, err := json.Marshal(v)
-		if err == nil {
 			content = string(data)
 		}
 	}

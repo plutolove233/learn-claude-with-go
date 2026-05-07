@@ -17,7 +17,8 @@ import (
 	"claudego/pkg/logger"
 	"claudego/pkg/permissions"
 	"claudego/pkg/types"
-	"claudego/pkg/ui"
+
+	"github.com/sashabaranov/go-openai"
 )
 
 type Agent struct {
@@ -32,10 +33,6 @@ type Agent struct {
 	sessionTokens int
 
 	todo *tools.TodoManager
-}
-
-func New(cfg *config.Config, l *logger.Logger, r interfaces.ToolRegistry) (*Agent, error) {
-	return NewWithPermissionPrompter(cfg, l, r, ui.PermissionPrompter{})
 }
 
 func NewWithPermissionPrompter(cfg *config.Config, l *logger.Logger, r interfaces.ToolRegistry, prompter permissions.Prompter) (*Agent, error) {
@@ -90,7 +87,7 @@ func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 	for {
 		if len(messages) > 0 {
 			lastMsg := messages[len(messages)-1]
-			if userMsg, ok := lastMsg.Content.(string); ok && strings.HasPrefix(userMsg, "/compact") {
+			if userMsg := lastMsg.Content; userMsg != "" && strings.HasPrefix(userMsg, "/compact") {
 				switch strings.TrimSpace(userMsg) {
 				case "/compact":
 					compactedMessages, compactErr := commands.HandleCompactCommand(ctx, a.compactor, messages, a.sessionID, a.logger)
@@ -150,9 +147,10 @@ func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 		// Persist ToolCalls in the assistant message so BuildMessages can
 		// reconstruct a well-formed history (API requires tool_calls before tool results).
 		messages = append(messages, types.Message{
-			Role:      "assistant",
-			Content:   result.Content,
-			ToolCalls: result.ToolCalls,
+			Role:             openai.ChatMessageRoleAssistant,
+			Content:          result.Content,
+			ToolCalls:        result.ToolCalls,
+			ReasoningContent: result.ReasoningContent,
 		})
 
 		if result.FinishReason == "stop" {
@@ -168,23 +166,28 @@ func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 		}
 
 		if len(result.ToolCalls) > 0 {
-			results := a.llmClient.ExecuteToolsWithOptions(ctx, result.ToolCalls, a.registry, llm.ToolExecutionOptions{
+			toolExecutionResults := tools.ExecuteTools(ctx, result.ToolCalls, a.registry, tools.ToolExecutionOptions{
 				Permissions: a.permissions,
 			})
-			results, err = a.compactor.ProcessToolResults(a.sessionID, results)
+			toolExecutionResults, err = a.compactor.ProcessToolResults(a.sessionID, toolExecutionResults)
 			if err != nil {
 				a.logger.Warning("L1 compression failed: %v", err)
 			}
 
-			a.logger.Info("Tool execution results: %+v", results)
+			a.logger.Info("Tool execution results: %+v", toolExecutionResults)
 
 			// Pass []ToolCallResult directly so BuildMessages emits proper
 			// ToolMessage entries instead of a freeform user string.
-			messages = append(messages, types.Message{Role: "user", Content: results})
+			messages = append(messages, types.Message{
+				Role:        openai.ChatMessageRoleTool,
+				Content:     "工具调用成功", // This content is not used by BuildMessages but can be helpful for debugging.
+				ToolCalls:   result.ToolCalls,
+				ToolResults: toolExecutionResults,
+			})
 			if used_todo == false {
 				reminder := a.todo.NoteRoundWithoutUpdate()
 				if reminder != "" {
-					results = append(results, types.ToolCallResult{
+					toolExecutionResults = append(toolExecutionResults, types.ToolCallResult{
 						Content: reminder,
 					})
 				}

@@ -1,5 +1,9 @@
 package tools
 
+/*
+之后需要修改
+*/
+
 import (
 	"context"
 	"encoding/json"
@@ -104,7 +108,7 @@ func (t *TaskTool) Execute(ctx context.Context, input []byte) (string, error) {
 			return "", fmt.Errorf("subtask failed: %w", err)
 		}
 		messages = append(messages, types.Message{
-			Role: "assistant", 
+			Role:    "assistant",
 			Content: response.Content,
 		})
 
@@ -113,15 +117,19 @@ func (t *TaskTool) Execute(ctx context.Context, input []byte) (string, error) {
 		}
 
 		if len(response.ToolCalls) > 0 {
-			results := t.llmClient.ExecuteTools(ctx, response.ToolCalls, registry)
+			results := ExecuteTools(ctx, response.ToolCalls, registry, ToolExecutionOptions{})
 
-			messages = append(messages, types.Message{Role: "user", Content: results})
+			messages = append(messages, types.Message{
+				Role:        "user",
+				Content:     "",
+				ToolResults: results,
+			})
 			continue
 		}
 		break
 	}
 	// Call LLM with filtered registry
 
-	ui.ToolOutput(messages[len(messages)-1].Content.(string))
-	return messages[len(messages)-1].Content.(string), nil
+	ui.ToolOutput(messages[len(messages)-1].Content)
+	return messages[len(messages)-1].Content, nil
 }

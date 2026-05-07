@@ -89,11 +89,7 @@ func TestAddToolResults(t *testing.T) {
 	}
 
 	// Content should be the tool results slice
-	toolResults, ok := messages[0].Content.([]types.ToolCallResult)
-	if !ok {
-		t.Fatalf("expected Content to be []types.ToolCallResult, got %T", messages[0].Content)
-	}
-
+	toolResults := messages[0].ToolResults
 	if len(toolResults) != 1 {
 		t.Fatalf("expected 1 tool result, got %d", len(toolResults))
 	}
