@@ -41,11 +41,21 @@ func main() {
 		log.Warning("Failed to load skills: %v", err)
 	}
 
+	line := liner.NewLiner()
+	defer line.Close()
+	line.SetCtrlCAborts(true)
+	line.SetCompleter(func(line string) []string {
+		if len(line) > 0 && line[0] == '/' {
+			return skillRegistry.Completions(line[1:])
+		}
+		return nil
+	})
+
 	tools.RegisterDefaults()
 	registry := tools.GetRegistry()
 
 	conv := conversation.New()
-	agent, err := loop.New(cfg, log, registry)
+	agent, err := loop.NewWithPermissionPrompter(cfg, log, registry, ui.NewPermissionPrompter(line.Prompt))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize agent: %v\n", err)
 		os.Exit(1)
@@ -56,18 +66,6 @@ func main() {
 	ui.Welcome("ClaudeGo Agent", "v1.0", cfg.Model, cwd)
 
 	rootCtx := context.Background()
-
-	line := liner.NewLiner()
-	defer line.Close()
-	line.SetCtrlCAborts(true)
-
-	// Configure skill auto-completion for liner
-	line.SetCompleter(func(line string) []string {
-		if len(line) > 0 && line[0] == '/' {
-			return skillRegistry.Completions(line[1:])
-		}
-		return nil
-	})
 
 	for {
 		query, err := line.Prompt(">_ ")
@@ -104,17 +102,17 @@ func main() {
 		}
 
 		if strings.HasPrefix(query, "/plan") {
-			
+
 			// } else if isComplexTask(query) {
-		// 	ui.Info("Detected complex task - entering plan mode...")
-		// 	if _, err := executor.RunWithPlan(ctx, query); err != nil {
-		// 		if ctx.Err() != nil {
-		// 			ui.Warning("Interrupted. Rolling back conversation.")
-		// 		} else {
-		// 			log.Warning("Plan execution failed: %v", err)
-		// 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		// 		}
-		// 	}
+			// 	ui.Info("Detected complex task - entering plan mode...")
+			// 	if _, err := executor.RunWithPlan(ctx, query); err != nil {
+			// 		if ctx.Err() != nil {
+			// 			ui.Warning("Interrupted. Rolling back conversation.")
+			// 		} else {
+			// 			log.Warning("Plan execution failed: %v", err)
+			// 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			// 		}
+			// 	}
 		} else {
 			conv.AddUserMessage(query)
 			checkpoint := conv.Checkpoint()

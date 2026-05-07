@@ -119,10 +119,29 @@ func ToolCall(name, args string) {
 	fmt.Println(bot)
 }
 
-type PermissionPrompter struct{}
+type PermissionPrompter struct {
+	prompt func(string) (string, error)
+}
 
-func (PermissionPrompter) PromptToolPermission(ctx context.Context, req permissions.PromptRequest) (permissions.PromptDecision, error) {
+func NewPermissionPrompter(prompt func(string) (string, error)) PermissionPrompter {
+	return PermissionPrompter{prompt: prompt}
+}
+
+func (p PermissionPrompter) PromptToolPermission(ctx context.Context, req permissions.PromptRequest) (permissions.PromptDecision, error) {
 	renderPermissionPrompt(req)
+	renderPermissionChoices()
+	answer, err := p.readAnswer(ctx, permissionChoicePrompt())
+	if err != nil {
+		return permissions.PromptDeny, err
+	}
+	return parsePermissionChoice(answer), nil
+}
+
+func (p PermissionPrompter) readAnswer(ctx context.Context, prompt string) (string, error) {
+	if p.prompt != nil {
+		return p.prompt(prompt)
+	}
+	fmt.Print(prompt)
 
 	type response struct {
 		answer string
@@ -137,19 +156,23 @@ func (PermissionPrompter) PromptToolPermission(ctx context.Context, req permissi
 
 	select {
 	case <-ctx.Done():
-		return permissions.PromptDeny, ctx.Err()
+		return "", ctx.Err()
 	case res := <-ch:
 		if res.err != nil {
-			return permissions.PromptDeny, res.err
+			return "", res.err
 		}
-		switch strings.ToLower(strings.TrimSpace(res.answer)) {
-		case "y", "yes":
-			return permissions.PromptAllowOnce, nil
-		case "a", "always":
-			return permissions.PromptAlwaysAllowSession, nil
-		default:
-			return permissions.PromptDeny, nil
-		}
+		return res.answer, nil
+	}
+}
+
+func parsePermissionChoice(answer string) permissions.PromptDecision {
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		return permissions.PromptAllowOnce
+	case "a", "always":
+		return permissions.PromptAlwaysAllowSession
+	default:
+		return permissions.PromptDeny
 	}
 }
 
@@ -176,11 +199,17 @@ func renderPermissionPrompt(req permissions.PromptRequest) {
 		}
 	}
 	fmt.Println(paint(BorderBottomLeft+strings.Repeat(BorderHorizontal, width-2)+BorderBottomRight, ColorWarning, ""))
+}
 
+func permissionChoicePrompt() string {
+	return "permission> "
+}
+
+func renderPermissionChoices() {
 	allowOnce := paint("[y]", ColorSuccess, "1") + paint(" allow once", ColorDefault, "")
 	allowSession := paint("[a]", ColorTitle, "1") + paint(" always allow this session", ColorDefault, "")
 	deny := paint("[n]", ColorError, "1") + paint(" deny", ColorDefault, "")
-	fmt.Print("  " + allowOnce + paint("  ", ColorMuted, "") + allowSession + paint("  ", ColorMuted, "") + deny + paint(": ", ColorMuted, ""))
+	fmt.Println("  " + allowOnce + paint("  ", ColorMuted, "") + allowSession + paint("  ", ColorMuted, "") + deny)
 }
 
 func permissionFieldLines(label, value string, width int) []string {

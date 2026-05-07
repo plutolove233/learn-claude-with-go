@@ -35,6 +35,10 @@ type Agent struct {
 }
 
 func New(cfg *config.Config, l *logger.Logger, r interfaces.ToolRegistry) (*Agent, error) {
+	return NewWithPermissionPrompter(cfg, l, r, ui.PermissionPrompter{})
+}
+
+func NewWithPermissionPrompter(cfg *config.Config, l *logger.Logger, r interfaces.ToolRegistry, prompter permissions.Prompter) (*Agent, error) {
 	if cfg.CompactionConfig == nil {
 		cfg.CompactionConfig = types.DefaultCompactionConfig()
 	}
@@ -56,7 +60,7 @@ func New(cfg *config.Config, l *logger.Logger, r interfaces.ToolRegistry) (*Agen
 	if cfg.Permissions != nil {
 		permissionConfig = *cfg.Permissions
 	}
-	permissionManager := permissions.NewManager(permissionConfig, ui.PermissionPrompter{})
+	permissionManager := permissions.NewManager(permissionConfig, prompter)
 
 	return &Agent{
 		cfg:           cfg,
