@@ -68,14 +68,13 @@ func main() {
 	rootCtx := context.Background()
 
 	for {
-		// query, err := line.Prompt(">_ ")
-		// if err != nil {
-		// 	if err == liner.ErrPromptAborted {
-		// 		continue
-		// 	}
-		// 	break
-		// }
-		query := "在当前目录下新建一个 hello world 的 python 脚本"
+		query, err := line.Prompt(">_ ")
+		if err != nil {
+			if err == liner.ErrPromptAborted {
+				continue
+			}
+			break
+		}
 
 		query = strings.TrimSpace(query)
 		if query == "" || query == "q" || query == "exit" {
@@ -96,10 +95,10 @@ func main() {
 			} else if strings.TrimSpace(loadedSkill) != "" {
 				conv.AddUserMessage(loadedSkill)
 			}
-			// stopListener()
-			// cancel()
-			// fmt.Println()
-			// continue
+			stopListener()
+			cancel()
+			fmt.Println()
+			continue
 		}
 
 		if strings.HasPrefix(query, "/plan") {
