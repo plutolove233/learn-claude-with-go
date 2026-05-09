@@ -6,6 +6,7 @@ import (
 	"claudego/pkg/types"
 	"claudego/pkg/ui"
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/sashabaranov/go-openai"
@@ -13,7 +14,34 @@ import (
 
 type ToolExecutionOptions struct {
 	Permissions interfaces.PermissionDecider
+	Hooks       HookRunner
+	SessionID   string
+	CWD         string
 }
+
+type HookRunner interface {
+	RunPreToolUse(ctx context.Context, input ToolHookInput) (HookDecision, error)
+	RunPostToolUse(ctx context.Context, input ToolHookInput) (HookDecision, error)
+}
+
+type ToolHookInput struct {
+	Event        string
+	SessionID    string
+	CWD          string
+	ToolName     string
+	ToolInput    map[string]any
+	ToolUseID    string
+	ToolResponse map[string]any
+}
+
+type HookDecision struct {
+	PermissionDecision       string
+	PermissionDecisionReason string
+	AdditionalContext        string
+}
+
+const HookPermissionDeny = "deny"
+const HookPermissionAllow = "allow"
 
 func ExecuteTools(ctx context.Context, toolCalls []openai.ToolCall, registry interfaces.ToolRegistry, options ToolExecutionOptions) []types.ToolCallResult {
 	var results []types.ToolCallResult
@@ -28,10 +56,50 @@ func ExecuteTools(ctx context.Context, toolCalls []openai.ToolCall, registry int
 		ui.ToolCall(fn.Name, fn.Arguments)
 
 		input := []byte(fn.Arguments)
+		hookToolInput := decodeToolArgumentsForHooks(input)
 		var output string
 		var toolFound bool
+		hookAllowed := false
 
-		if options.Permissions != nil {
+		if options.Hooks != nil {
+			decision, hookErr := options.Hooks.RunPreToolUse(ctx, ToolHookInput{
+				Event:     "PreToolUse",
+				SessionID: options.SessionID,
+				CWD:       options.CWD,
+				ToolName:  fn.Name,
+				ToolInput: hookToolInput,
+				ToolUseID: tc.ID,
+			})
+			if hookErr != nil {
+				output = fmt.Sprintf("Error: pre-tool hook failed for %s: %v", fn.Name, hookErr)
+				ui.ToolOutput(output)
+				results = append(results, types.ToolCallResult{
+					Name:       fn.Name,
+					ToolCallID: tc.ID,
+					Content:    output,
+				})
+				continue
+			}
+			if decision.PermissionDecision == HookPermissionDeny {
+				reason := decision.PermissionDecisionReason
+				if reason == "" {
+					reason = "blocked by hook"
+				}
+				output = fmt.Sprintf("Error: hook denied %s: %s", fn.Name, reason)
+				ui.ToolOutput(output)
+				results = append(results, types.ToolCallResult{
+					Name:       fn.Name,
+					ToolCallID: tc.ID,
+					Content:    output,
+				})
+				continue
+			}
+			if decision.PermissionDecision == HookPermissionAllow {
+				hookAllowed = true
+			}
+		}
+
+		if options.Permissions != nil && !hookAllowed {
 			decision := options.Permissions.Decide(ctx, permissions.Request{
 				ToolName:  fn.Name,
 				Arguments: input,
@@ -66,6 +134,23 @@ func ExecuteTools(ctx context.Context, toolCalls []openai.ToolCall, registry int
 
 		ui.ToolOutput(output)
 
+		if options.Hooks != nil && toolFound {
+			_, hookErr := options.Hooks.RunPostToolUse(ctx, ToolHookInput{
+				Event:     "PostToolUse",
+				SessionID: options.SessionID,
+				CWD:       options.CWD,
+				ToolName:  fn.Name,
+				ToolInput: hookToolInput,
+				ToolUseID: tc.ID,
+				ToolResponse: map[string]any{
+					"content": output,
+				},
+			})
+			if hookErr != nil {
+				output = output + "\nError: post-tool hook failed: " + hookErr.Error()
+			}
+		}
+
 		results = append(results, types.ToolCallResult{
 			Name:       fn.Name,
 			ToolCallID: tc.ID,
@@ -73,4 +158,18 @@ func ExecuteTools(ctx context.Context, toolCalls []openai.ToolCall, registry int
 		})
 	}
 	return results
+}
+
+func decodeToolArgumentsForHooks(input []byte) map[string]any {
+	if len(input) == 0 {
+		return map[string]any{}
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(input, &decoded); err != nil {
+		return map[string]any{"raw": string(input)}
+	}
+	if decoded == nil {
+		return map[string]any{}
+	}
+	return decoded
 }

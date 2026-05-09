@@ -44,6 +44,31 @@ func TestConfigIncludesPermissions(t *testing.T) {
 	}
 }
 
+func TestConfigIncludesHooks(t *testing.T) {
+	data := []byte(`{
+		"api_key": "key",
+		"hooks": {
+			"PreToolUse": [
+				{
+					"matcher": "bash",
+					"hooks": [
+						{"type": "command", "command": "echo ok"}
+					]
+				}
+			]
+		}
+	}`)
+
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+	groups := cfg.Hooks["PreToolUse"]
+	if len(groups) != 1 || groups[0].Matcher != "bash" || groups[0].Hooks[0].Command != "echo ok" {
+		t.Fatalf("unexpected hook config: %#v", cfg.Hooks)
+	}
+}
+
 func TestDefaultConfigPath_NormalCase(t *testing.T) {
 	path := DefaultConfigPath()
 

@@ -6,5 +6,31 @@
     "allow": ["file_handler(read:*)"],
     "ask": ["bash(*)", "file_handler(write:*)"],
     "deny": ["bash(sudo *)", "file_handler(*:.env*)"]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {"type": "command", "command": "echo 'Project context loaded by hook.'"}
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "bash",
+        "hooks": [
+          {"type": "command", "command": "$HOME/.claudego/hooks/pre-bash.sh"}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "file_handler",
+        "hooks": [
+          {"type": "command", "command": "$HOME/.claudego/hooks/post-file.sh"}
+        ]
+      }
+    ]
   }
 }

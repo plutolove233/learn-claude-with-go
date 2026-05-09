@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"claudego/pkg/hooks"
 	"claudego/pkg/permissions"
 	"claudego/pkg/types"
 )
@@ -15,6 +16,7 @@ type Config struct {
 	Model            string                  `json:"model"`
 	CompactionConfig *types.CompactionConfig `json:"compaction_config,omitempty"`
 	Permissions      *permissions.Config     `json:"permissions,omitempty"`
+	Hooks            hooks.Config            `json:"hooks,omitempty"`
 }
 
 func Load() (*Config, error) {

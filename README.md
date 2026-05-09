@@ -65,6 +65,16 @@ Create `~/.claudego/config.json`:
     "allow": ["file_handler(read:*)"],
     "ask": ["bash(*)", "file_handler(write:*)"],
     "deny": ["bash(sudo *)", "file_handler(*:.env*)"]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "bash",
+        "hooks": [
+          {"type": "command", "command": "$HOME/.claudego/hooks/pre-bash.sh"}
+        ]
+      }
+    ]
   }
 }
 ```
@@ -78,6 +88,10 @@ Create `~/.claudego/config.json`:
 ClaudeGo checks every tool call before execution. Permission rules support `allow`, `ask`, and `deny`; `deny` wins over all other rules.
 
 Built-in defaults allow file reads, ask before file writes and bash commands, allow `load_skill` and `todo_manager`, and ask for unknown tools. Choosing "always allow this session" only affects the current process and does not modify the config file.
+
+### Hooks
+
+ClaudeGo supports command hooks for `SessionStart`, `PreToolUse`, and `PostToolUse`. Hooks receive event JSON on stdin. `PreToolUse` can block a tool by exiting with code `2` or by printing JSON with `hookSpecificOutput.permissionDecision` set to `deny`.
 
 ## Usage
 

@@ -12,6 +12,7 @@ import (
 	"claudego/internal/config"
 	"claudego/internal/tools"
 	"claudego/pkg/compaction"
+	"claudego/pkg/hooks"
 	"claudego/pkg/interfaces"
 	"claudego/pkg/llm"
 	"claudego/pkg/logger"
@@ -27,6 +28,7 @@ type Agent struct {
 	registry    interfaces.ToolRegistry
 	llmClient   *llm.Client
 	permissions *permissions.Manager
+	hooks       *hooks.Runner
 
 	compactor     *compaction.Compactor
 	sessionID     string
@@ -65,6 +67,7 @@ func NewWithPermissionPrompter(cfg *config.Config, l *logger.Logger, r interface
 		registry:      r,
 		llmClient:     llmClient,
 		permissions:   permissionManager,
+		hooks:         hooks.NewRunner(cfg.Hooks),
 		compactor:     compactor,
 		sessionID:     sessionID,
 		sessionTokens: 0,
@@ -83,6 +86,20 @@ func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 	systemPrompt := fmt.Sprintf("You are a coding agent at %s. Use bash to solve tasks.", pwd)
+	sessionStart, err := a.hooks.RunSessionStart(ctx, hooks.SessionStartInput{
+		CommonInput: hooks.CommonInput{
+			SessionID: a.sessionID,
+			CWD:       pwd,
+		},
+		Source: "startup",
+		Model:  a.cfg.Model,
+	})
+	if err != nil {
+		return fmt.Errorf("SessionStart hook failed: %w", err)
+	}
+	if sessionStart.AdditionalContext != "" {
+		systemPrompt += "\n\nHook context:\n" + sessionStart.AdditionalContext
+	}
 
 	for {
 		if len(messages) > 0 {
@@ -168,6 +185,9 @@ func (a *Agent) Run(ctx context.Context, messages []types.Message) error {
 		if len(result.ToolCalls) > 0 {
 			toolExecutionResults := tools.ExecuteTools(ctx, result.ToolCalls, a.registry, tools.ToolExecutionOptions{
 				Permissions: a.permissions,
+				Hooks:       hookAdapter{runner: a.hooks},
+				SessionID:   a.sessionID,
+				CWD:         pwd,
 			})
 			toolExecutionResults, err = a.compactor.ProcessToolResults(a.sessionID, toolExecutionResults)
 			if err != nil {
